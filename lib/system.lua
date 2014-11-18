@@ -13,3 +13,25 @@
 return 
 	{shard = require('./system/sharded')
 	,replicate = require('./system/replicated')}
+
+
+local Emitter = require('core').Emitter
+local logger = require('../logger')
+
+local System = Emitter:extend()
+
+function System:initialize(config,node_id)
+	self.config = config
+	self.members = {}
+	self.id = node_id
+end
+
+function System:add_member(member)
+	self.members[#self.members + 1] = member
+
+
+end
+
+function System:enable()
+
+end
