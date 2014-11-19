@@ -33,20 +33,22 @@ function Sharded:divide(data,id,is_alive)
 		end
 	end
 
+	-- the pattern ((i - 1) % count) + 1 is because lua arrays are not
+	-- 0 based. so i shift it to 0 based, then shift it back to 1 based
 	for i=1,#data do
 		
-		if (i % count) + 1 == id then
+		if ((i - 1) % count) + 1 == id then
 			-- the data point is assigned to this node
 			add[#add + 1] = data[i]
 
-		elseif not is_alive[(i % count) + 1] then
+		elseif not is_alive[((i - 1) % count) + 1] then
 			-- if the other node is down, and we are responsible for it
 			-- add it in
 			if (idx % alive_count) + 1 == id then
 				add[#add + 1] = data[i]
 
 			else
-				-- another node is responsible for the failvoer
+				-- another node is responsible for the failover
 				remove[#remove + 1] = data[i]
 			end
 			idx = idx + 1
