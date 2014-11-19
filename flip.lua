@@ -30,8 +30,7 @@ function Flip:initialize(config)
 
 	self.system = System:new(config.cluster,config.id)
 
-	for id,opts in pairs(config.servers) do
-		opts.id = id
+	for _idx,opts in pairs(config.sorted_servers) do
 		member = Member:new(opts,config)
 		self.system:add_member(member)
 		self:add_member(member)
