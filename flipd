@@ -30,7 +30,7 @@ end
 
 if configPath == '-h' then
 	p("usage: flipd [path/to/config/file]")
-	process:exit(0)
+	process.exit(0)
 else
 
 	local validate_config = function(config)
@@ -42,7 +42,7 @@ else
 				else
 					logger:fatal('config is missing required field \''.. name ..'\'')
 				end
-				process:exit(1)	
+				process.exit(1)	
 			end
 		end
 

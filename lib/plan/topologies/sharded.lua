@@ -24,19 +24,19 @@ function Sharded:divide(data,id,is_alive)
 	
 	-- count how many servers are alive, also shift this id down if any
 	-- servers before this one have been turned off
+	local failed_count = 0
 	for idx,is_alive in pairs(is_alive) do
 		if not is_alive then
 			if idx < id then
-				id = id - 1
+				failed_count = failed_count + 1
 			end
 			alive_count = alive_count - 1
 		end
 	end
 
 	-- the pattern ((i - 1) % count) + 1 is because lua arrays are not
-	-- 0 based. so i shift it to 0 based, then shift it back to 1 based
+	-- 0 based. so I shift it to 0 based, then I shift it back to 1 based
 	for i=1,#data do
-		
 		if ((i - 1) % count) + 1 == id then
 			-- the data point is assigned to this node
 			add[#add + 1] = data[i]
@@ -44,7 +44,7 @@ function Sharded:divide(data,id,is_alive)
 		elseif not is_alive[((i - 1) % count) + 1] then
 			-- if the other node is down, and we are responsible for it
 			-- add it in
-			if (idx % alive_count) + 1 == id then
+			if ((idx - 1) % alive_count) + 1 == (id - failed_count) then
 				add[#add + 1] = data[i]
 
 			else

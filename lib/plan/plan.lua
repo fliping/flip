@@ -19,10 +19,10 @@ local topologies = require('./topologies/topologies')
 
 local Plan = Emitter:extend()
 
-function Plan:initialize(system,id,type)
-	local Topology = topologies[type]
+function Plan:initialize(system,id)
+	local Topology = topologies[system.type]
 	if not Topology then
-		logger:fatal("unknown data distribution type",type)
+		logger:fatal("unknown data distribution type",system.type)
 		process:exit(1)
 	end
 
@@ -35,6 +35,11 @@ function Plan:initialize(system,id,type)
 	self.id = id
 	self.plan = {}
 	self.members = {}
+	self.alive = {}
+	self.new_plan_delay = system.delay
+	if not self.new_plan_delay then
+		self.new_plan_delay = 500
+	end
 
 	-- we expose the ability to remove all data on start
 	-- it defaults to removing the data
@@ -50,30 +55,45 @@ function Plan:add_member(member)
 	self.alive[#self.members] = true
 end
 
+function Plan:disable()
+	self:_run('down',self.plan,function()
+		process.exit(1)
+	end)
+end
+
 function Plan:enable()
 	local plan = self
 	-- when members change their state, we need to have a new plan built
-	for id,member in members do
-		member:on('state_change',function(_member,state)
-			if state == 'alive' then
-				self.alive[id] = true
-			elseif state == 'down' then
-				self.alive[id] = false
-			else
-				return
-			end
+	for id,member in pairs(self.members) do
 
-			-- one of the members changed state
-			-- create a new generation of this plan
-			plan:next_plan()
-		end)
+		-- instead of the actual id of the node, we want to store its 
+		-- numeric order
+		if member.id == self.id then
+			self.id = id
+		end
+		local bind_id = function(an_id)
+			return function(_member,state)
+				if state == 'alive' then
+					self.alive[an_id] = true
+				elseif state == 'down' then
+					self.alive[an_id] = false
+				else
+					return
+				end
+
+				-- one of the members changed state
+				-- create a new generation of this plan
+				plan:next_plan()
+			end
+		end
+		member:on('state_change',bind_id(id))
 	end
 end
 
 function Plan:next_plan()
 
 	-- we ask the topology what data points are needed
-	local add,remove = self.topology(self.system.data
+	local add,remove = self.topology:divide(self.system.data
 																	,self.id,self.alive)
 
 	local new_plan = {add = add,remove = remove}
@@ -96,8 +116,8 @@ function Plan:next_plan()
 		-- changes get pulled into a single plan update
 		logger:debug("setting plan",new_plan)
 		local me = self
-		self.plan_activation_timer = timer.setTimeout(Timeout,function(a_plan)
-			self.plan_activation_timer = nil
+		self.plan_activation_timer = timer.setTimeout(self.new_plan_delay,function(a_plan)
+			me.plan_activation_timer = nil
 			me:compute(a_plan)
 		end,new_plan)
 	end
@@ -114,33 +134,43 @@ function Plan:compute(new_plan)
 	local remove = {}
 	local index = 1
 	local lidx = 1
-	logger:debug("start",idx,new_plan)
+	logger:debug("start",idx,new_add,self.plan)
 
-	for idx=1, #new_add do
+	while lidx <= #new_add do
+	-- for idx=1, #new_add do
 		
 		
-		logger:debug("compare",self.plan[index],new_add[idx])
-		if (new_add[idx] and not self.plan[index]) or (self.plan[index] > new_add[idx]) then
+		logger:debug("compare",lidx,self.plan[index],new_add[lidx])
+		-- new_add = { "192.168.0.1", "192.168.0.2", "192.168.0.3", "192.168.0.4" }	
+		-- self.plan = { "192.168.0.2", "192.168.0.4" }
+		
+		-- add .1
+		-- skip .2
+		-- add .3
+		-- skip .4
+
+		if (not new_add[lidx]) or (not self.plan[index]) then
+			-- if we run out of data, then we don't need to compare anymore
+			break
+		elseif self.plan[index] > new_add[lidx] then
 			-- we need to add data points that are members of new_add and 
 			-- not members of self.plan
-			logger:debug("adding",new_add[idx])
-			add[#add +1] = new_add[idx]
-		elseif (self.plan[idx] and not new_add[index]) or (self.plan[index] < new_add[idx]) then
+			logger:debug("adding",new_add[lidx])
+			add[#add +1] = new_add[lidx]
+			lidx = lidx + 1
+		elseif self.plan[index] < new_add[lidx] then
 			-- we need to remove data points that are members of self.plan and 
 			-- not members of new_add
-			logger:debug("removing",new_add[idx])
+			logger:debug("removing",new_add[lidx])
 			remove[#remove +1] = self.plan[index]
 			index = index + 1
-			idx = idx - 1
 		else
 			-- everything else gets ignored.
-			logger:debug("skipping",new_add[idx])
-			idx = idx + 1
+			logger:debug("skipping",new_add[lidx])
+			lidx = lidx + 1
 			index = index + 1
 		end
-		lidx = idx
 	end
-	lidx = lidx + 1
 
 	-- everything leftover else gets removed
 	for index=index,#self.plan do
@@ -172,18 +202,13 @@ function Plan:compute(new_plan)
 	end
 end
 
-function Plan:shutdown()
-	self:_run('down',self.plan,function()
-		process.exit(1)
-	end)
-end
-
 function Plan:run()
 
 	local newest_plan = {}
 
 	-- we want to add in all data points that haven't been flagged
 	-- to be removed
+	logger:debug("examining",self.plan,self.queue)
 	for _idx,current in pairs(self.plan) do
 		local skip = false
 		for _idx,value in pairs(self.queue.remove) do
@@ -193,17 +218,22 @@ function Plan:run()
 			end
 		end
 		if not skip then
+			logger:debug("not skipping",current)
 			newest_plan[#newest_plan + 1] = current
+		else
+			logger:debug("skipping",current)
 		end
 	end
 
 
 	-- add in all new data points
 	for _idx,value in pairs(self.queue.add) do
+		logger:debug("adding",value)
 		newest_plan[#newest_plan + 1] = value
 	end
 
 	self.plan = newest_plan
+	table.sort(self.plan)
 	
 	local queue = self.queue
 	self.queue = true
@@ -221,7 +251,7 @@ function Plan:run()
 			else
 				-- if there is another thing queued up to run,
 				-- lets run it
-				logger:info("running next set of jobs",self.queue)
+				logger:debug("running next set of jobs",self.queue.add)
 				local queue = self.queue
 				self.queue = nil
 				self:compute(queue)

@@ -9,5 +9,5 @@
 -- Created :   19 Nov 2014 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 return
-	{sharded = require('./sharded')
-	,replicated = require('./replicated')}
+	{shard = require('./sharded')
+	,replicate = require('./replicated')}

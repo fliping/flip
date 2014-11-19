@@ -16,13 +16,15 @@ local Emitter = require('core').Emitter
 local logger = require('./logger')
 
 local System = Emitter:extend()
-
+local id = 0
 function System:initialize(config,node_id)
 	self.config = config
-	self.members = 0
+	self.members = {}
 	self.indexed_members = {}
 	self.plans = {}
 	self.id = node_id
+	self._id = id
+	id = id + 1
 	self.enabled = false
 
 	-- set the default remove_on_failure behavior
@@ -32,8 +34,7 @@ function System:initialize(config,node_id)
 end
 
 function System:add_member(member)
-	self.members = self.members + 1 
-	self.members[#self.members + 1] = member
+	self.members[#self.members + 1] = member.id
 	self.indexed_members[member.id] = member
 end
 
@@ -54,19 +55,20 @@ function System:enable()
 		-- we create all plans that need to exist on this local node
 		local this_node = self.indexed_members[self.id]
 		for _idx,sys_id in pairs(this_node.systems) do
-			local sys_config = self.config.cluster[sys_id]
+			local sys_config = self.config.system[sys_id]
 			if sys_config then
-				self.plans[sys_id] = Plan:new(sys_config,config.id)
+				self.plans[sys_id] = Plan:new(sys_config,self.id)
 			else
 				logger:fatal('system does not exist in the cluster',sys_id)
-				process:exit(1)
+				process.exit(1)
 			end
 		end
 
 		-- all members need to be added into the plans that exists on
 		-- this node
-		for _idx,member in pairs(self.members) do
-			for _idx,sys_id in member.systems do
+		for _idx,id in pairs(self.members) do
+			local member = self.indexed_members[id]
+			for _idx,sys_id in pairs(member.systems) do
 				local plan = self.plans[sys_id]
 				if plan then
 					plan:add_member(member)
@@ -91,3 +93,5 @@ function System:enable()
 		logger:warning('requested to enable system, but already enabled')
 	end
 end
+
+return System

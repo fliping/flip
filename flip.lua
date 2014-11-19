@@ -17,7 +17,7 @@ local string = require('string')
 local math = require('math')
 local logger = require('./lib/logger')
 local Member = require('./lib/member')
-local systems = require('./lib/system')
+local System = require('./lib/system')
 
 local Flip = Emitter:extend()
 
@@ -26,18 +26,14 @@ function Flip:initialize(config)
 	self.servers = {}
 	self.note = {}
 
-	local main_server = config.servers[config.id]
-
 	self.system = System:new(config.cluster,config.id)
-
+	
 	for _idx,opts in pairs(config.sorted_servers) do
 		member = Member:new(opts,config)
 		self.system:add_member(member)
 		self:add_member(member)
 		member:on('state_change',function(...) self:check(...) end)
 	end
-
-	self.system = System:new(config.cluster,config.id)
 
 	self.commands = 
 		{ping = self.ping
@@ -53,7 +49,7 @@ function Flip:start()
 	member:update_state('alive')
 	
 	local socket = dgram.createSocket('udp4')
-	socket:bind(main_server.port,main_server.ip)
+	socket:bind(member.port,member.ip)
 	socket:on('message',function(...) self:handle_message(...) end)
 	self.dgram = socket
 

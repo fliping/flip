@@ -30,6 +30,7 @@ function Member:initialize(config,global)
 	self.ip = config.ip
 	self.port = config.port
 	self.id = config.id
+	self.systems = config.systems
 	logger:debug('created member',config)
 	self.probed = {}
 end
