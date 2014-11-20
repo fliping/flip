@@ -80,10 +80,9 @@ function Member:alive(seq)
 	end
 end
 
-function Member:ping()
-	self.last_send = hrtime()
+function Member:next_seq()
 	self.packet_seq = self.packet_seq + 1
-	return self.config.key ..' ping:' .. self.packet_seq.. ',' .. self.config.id .. ';'
+	return self.packet_seq
 end
 
 function Member:update_state(new_state)
