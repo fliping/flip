@@ -68,8 +68,8 @@ function Flip:start()
 end
 
 function Flip:find_member(key)
-	if type(key) == "integer" then
-
+	if type(key) == "number" then
+		return self.iservers[key]
 	else
 		return self.servers[key]
 	end
@@ -171,8 +171,10 @@ function Flip:ping(seq,id,nodes)
 			local packet = self.packet:build(self.config.key,self.id,member:next_seq(),self.alive)
 			logger:debug('sending ping (ack)',id)
 			self:send_packet(packet,member)
-			for _idx,node in pairs(nodes) do
-				self:probe(id,node)
+			for node,alive in pairs(nodes) do
+				if not alive then
+					self:probe(id,node)
+				end
 			end
 		end
 	else
@@ -195,8 +197,6 @@ function Flip:probe(from,...)
 
 		if down_member then
 			down_member:probe(from)
-		else
-			logger:warning('unknown member',who)
 		end
 	end
 end

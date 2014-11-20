@@ -41,7 +41,6 @@ local integerify = function(val)
 end
 
 function Packet:build(secret,id,seq,alive_servers)
-	logger:info("building",secret,id,seq,alive_servers)
 	if not (#alive_servers < 512) then
 		logger:fatal("too many servers")
 		process.exit(1)
@@ -61,20 +60,21 @@ function Packet:build(secret,id,seq,alive_servers)
 			byte = 0
 		end
 	end
+	if not (byte == 0) then
+		chunks[#chunks + 1] = string.char(byte)
+	end
 	return table.concat(chunks)
 end
 
 function Packet:parse(packet)
 	local size = packet:len()
-	if(size < 32+4) then
+	if(size < 32+8) then
 		return
 	end
 
 	local nodes = {}
 	local header_size = 32 + 8
 	local id = -1
-
-
 
 	for idx=header_size+1,size do
 		local byte = packet:byte(idx)

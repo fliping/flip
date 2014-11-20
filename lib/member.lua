@@ -81,6 +81,7 @@ function Member:alive(seq)
 end
 
 function Member:next_seq()
+	self.last_send = hrtime()
 	self.packet_seq = self.packet_seq + 1
 	return self.packet_seq
 end
