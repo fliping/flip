@@ -31,6 +31,7 @@ function Member:initialize(config,global)
 	self.port = config.port
 	self.id = config.id
 	self.systems = config.systems
+	self.opts = config.opts
 	if not self.systems then
 		self.systems = {}
 	end

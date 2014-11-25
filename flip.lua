@@ -20,6 +20,7 @@ local logger = require('./lib/logger')
 local Member = require('./lib/member')
 local System = require('./lib/system')
 local Packet = require('./lib/packet')
+local Api = require('./lib/api')
 
 local Flip = Emitter:extend()
 
@@ -29,6 +30,7 @@ function Flip:initialize(config)
 	self.iservers = {}
 	self.alive = {}
 	self.packet = Packet:new()
+	self.api = Api:new(self)
 
 	self.system = System:new(config.cluster,config.id)
 	
@@ -40,7 +42,7 @@ function Flip:initialize(config)
 		member = Member:new(opts,config)
 		self.system:add_member(member)
 		self:add_member(member)
-		member:on('state_change',function(...) self:track(...,idx) end)
+		member:on('state_change',function(...) self:track(idx,...) end)
 		if member.id == config.id then
 			self.id = idx
 		end
@@ -182,7 +184,12 @@ function Flip:ping(seq,id,nodes)
 	end
 end
 
-function Flip:track(member,new_state,id)
+function Flip:track(id,member,new_state)
+	self.api.status:push(
+		{id = member.id
+		,state = new_state
+		,opts = member.opts})
+
 	if new_state == 'alive' then
 		self.alive[id] = true
 	elseif (new_state == 'down') or (new_state == 'probably_down') then
