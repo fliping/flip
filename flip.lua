@@ -16,6 +16,7 @@ local table = require('table')
 local string = require('string')
 local json = require('json')
 local math = require('math')
+local hrtime = require('uv').Process.hrtime
 local logger = require('./lib/logger')
 local Member = require('./lib/member')
 local System = require('./lib/system')
@@ -188,7 +189,8 @@ function Flip:track(id,member,new_state)
 	self.api.status:push(
 		{id = member.id
 		,state = new_state
-		,opts = member.opts})
+		,opts = member.opts
+		,time = hrtime()})
 
 	if new_state == 'alive' then
 		self.alive[id] = true

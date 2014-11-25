@@ -10,6 +10,7 @@
 ---------------------------------------------------------------------
 
 local Emitter = require('core').Emitter
+local hrtime = require('uv').Process.hrtime
 local logger = require('./logger')
 local JSON = require('json')
 local Lever = require('lever')
@@ -28,15 +29,12 @@ local Api = Emitter:extend()
 
 function Api:initialize(flip)
 	self.flip = flip
-	self.lever = Lever:new(8081,"127.0.0.1")
+	self.lever = Lever:new(8082,"127.0.0.1")
 	self.status = Start:new()
 
 	-- express routes
 	self.lever:get('/cluster'
 		,function(req,res) self:node_status(req,res) end)
-
-	self.lever:get('/system/?system'
-		,function(req,res) self:system_status(req,res) end)
 
 	-- piped routes
 
@@ -44,11 +42,6 @@ function Api:initialize(flip)
 	self.status
 		:pipe(self.lever.json())
 		:pipe(self.lever:get('/cluster/stream'))
-
-
-	self.system
-		:pipe(self.lever.json())
-		:pipe(self.lever:get('/system/?system/stream'))
 
 end
 
@@ -62,7 +55,9 @@ function Api:node_status(req,res)
 			,opts = node.opts}
 	end
 	res:writeHead(200,{})
-  res:finish(JSON.stringify(data))
+	local time = hrtime()
+	self.status:push({time = time})
+  res:finish(JSON.stringify({time = time,data = data}))
 end
 
 
