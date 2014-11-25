@@ -31,7 +31,9 @@ function Flip:initialize(config)
 	self.iservers = {}
 	self.alive = {}
 	self.packet = Packet:new()
-	self.api = Api:new(self)
+	if config.api then
+		self.api = Api:new(self,config.api.port,config.api.ip)
+	end
 
 	self.system = System:new(config.cluster,config.id)
 	
@@ -186,11 +188,13 @@ function Flip:ping(seq,id,nodes)
 end
 
 function Flip:track(id,member,new_state)
-	self.api.status:push(
-		{id = member.id
-		,state = new_state
-		,opts = member.opts
-		,time = hrtime()})
+	if self.api then
+		self.api.status:push(
+			{id = member.id
+			,state = new_state
+			,opts = member.opts
+			,time = hrtime()})
+	end
 
 	if new_state == 'alive' then
 		self.alive[id] = true

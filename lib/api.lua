@@ -27,9 +27,9 @@ function Start:_read() end
 
 local Api = Emitter:extend()
 
-function Api:initialize(flip)
+function Api:initialize(flip,port,ip)
 	self.flip = flip
-	self.lever = Lever:new(8082,"127.0.0.1")
+	self.lever = Lever:new(port,ip)
 	self.status = Start:new()
 
 	-- express routes
