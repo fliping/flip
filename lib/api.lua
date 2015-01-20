@@ -52,6 +52,7 @@ function Api:node_status(req,res)
 		data[#data + 1] = 
 			{id = node.id
 			,state = node.state
+			,systems = node.systems
 			,opts = node.opts}
 	end
 	res:writeHead(200,{})

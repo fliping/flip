@@ -266,6 +266,10 @@ function Plan:_run(state,data,cb)
 	local sys = self.system
 	local count = #data
 	for idx,value in pairs(data) do
+		-- inform the api of changes
+		-- local change = {type:"assign data",data:{state:state value:value}}
+		-- self:publish('api',change)
+
 		local child = spawn(sys[state],{value,JSON.stringify(sys.config)})
 		
 		child.stdout:on('data', function(chunk)

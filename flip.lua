@@ -193,6 +193,7 @@ function Flip:track(id,member,new_state)
 			{id = member.id
 			,state = new_state
 			,opts = member.opts
+			,systems = member.systems
 			,time = hrtime()})
 	end
 
