@@ -205,12 +205,13 @@ function Flip:track(id,member,new_state)
 end
 
 function Flip:probe(from,...)
-	if not (self.config.id == who) then
+	for idx,who in pairs({...}) do
+		if not (self.config.id == who) then
+			local down_member = self:find_member(who)
 
-		local down_member = self:find_member(who)
-
-		if down_member then
-			down_member:probe(from)
+			if down_member then
+				down_member:probe(from)
+			end
 		end
 	end
 end
