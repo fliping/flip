@@ -16,26 +16,11 @@ local Emitter = require('core').Emitter
 local logger = require('./logger')
 
 local System = Emitter:extend()
-local id = 0
-function System:initialize(config,node_id)
-	self.config = config
-	self.members = {}
-	self.indexed_members = {}
+function System:initialize(store,id)
+	self.store = store
 	self.plans = {}
-	self.id = node_id
-	self._id = id
-	id = id + 1
+	self.id = id
 	self.enabled = false
-
-	-- set the default remove_on_failure behavior
-	if config.remove_on_failure == nil then
-		config.remove_on_failure = true
-	end
-end
-
-function System:add_member(member)
-	self.members[#self.members + 1] = member.id
-	self.indexed_members[member.id] = member
 end
 
 function System:disable(cb)
@@ -63,36 +48,100 @@ function System:disable(cb)
 	end
 end
 
-function System:enable()
-	if not self.enabled then
-		self.enabled = true
-		-- we create all plans that need to exist on this local node
-		local this_node = self.indexed_members[self.id]
-		for _idx,sys_id in pairs(this_node.systems) do
-			local sys_config = self.config.system[sys_id]
-			if sys_config then
-				self.plans[sys_id] = Plan:new(sys_config,self.id)
-			else
-				logger:fatal('system does not exist in the cluster',sys_id)
-				process.exit(1)
-			end
+function System:update_member(member)
+	for _idx,sys_id in pairs(member.systems) do
+		local plan = self.plans[sys_id]
+		if not plan then
+			logger:warning("plan must be created before added to a member")
+		else
+			plan:add_member(member)
 		end
+	end
 
-		-- all members need to be added into the plans that exists on
-		-- this node
-		for _idx,id in pairs(self.members) do
-			local member = self.indexed_members[id]
+	if member.id == self.id then
+		-- we need to start any new plans
+		-- and destroy any old plans
+		-- but only if we are enabled
+		if self.enabled then
+			-- do some set magic
+			
+			-- still need to disable old plans
+
 			for _idx,sys_id in pairs(member.systems) do
 				local plan = self.plans[sys_id]
-				if plan then
-					plan:add_member(member)
+				if not plan then
+					logger:warning("unable to start non existant plan")
+				else
+					logger:info("enabling a plan",plan)
+					plan:enable()
 				end
 			end
 		end
+	else
+		
+	end
+end
+
+function System:remove_member(member)
+	-- can we ever remove this server as a member? probably on shut down
+	if member.id == self.id then
+		if self.enabled then
+			self:disable(
+				function() logger:info("this server has been removed from the cluster.")
+			end)
+		end
+	else
+		for _idx,sys_id in pairs(member.systems) do
+			local plan = self.plans[sys_id]
+			if not(plan == nil) then
+				logger:info("no plan for system:",sys_id)
+				plan:remove_member(member)
+			end
+		end
+	end
+end
+
+function System:check_system(kind,id,system_config) 
+	logger:info("checking system",kind,id,system_config)
+	if kind == "store" then
+		local plan = self.plans[id]
+		if plan then
+			plan:update(system_config)
+			logger:info("updated plan:",id)
+		else
+			self.plans[id] = Plan:new(system_config,id,self.id)
+			logger:info("created plan:",id)
+		end
+	elseif kind == "delete" then
+		local plan = self.plans[id]
+		if plan then
+			self.plans[id] = nil
+			plan:disable(function() 
+				logger:info("removed plan:",id)
+			end)
+		end
+	end
+end
+
+function System:enable()
+	if not self.enabled then
+		self.enabled = true
+		local systems,err = self.store:fetch("systems")
+		
+		if err then
+			logger:info("no systems present in cluster",err)
+			systems = {}
+		end
+
+		for sys_id,system_config in pairs(systems) do
+			self.plans[sys_id] = Plan:new(sys_config)
+		end
+
+		self.store:on("systems",function(kind,id,system_config) self:check_system(kind,id,system_config) end)
 
 		-- when this process shutsdown, we want to remove all data
 		-- that it is responsible for, but only if requested
-		if self.config.remove_on_failure then
+		if true then
 			local me = self
 			local stop = function() me:disable(function() process.exit(0) end) end
 			process:on('SIGINT',stop)
@@ -100,10 +149,11 @@ function System:enable()
 			process:on('SIGTERM',stop)
 		end
 
-		-- we enable all the plans to start the ball rolling
-		for _idx,plan in pairs(self.plans) do
-			plan:enable()
-		end
+		-- we don't do this, this happens when this server gets added into the store
+		-- -- we enable all the plans to start the ball rolling
+		-- for _idx,plan in pairs(self.plans) do
+		-- 	plan:enable()
+		-- end
 	else
 		logger:warning('requested to enable system, but already enabled')
 	end

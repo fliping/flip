@@ -15,11 +15,13 @@ local os = require('os')
 local JSON = require('json')
 local math = require('math')
 local utils = require('utils')
+local hrtime = require('uv').Process.hrtime
 local Flip = require('./flip')
 local logger = require('./lib/logger')
 
 
-
+-- init the random seed for later when it is used
+math.randomseed(hrtime())
 
 -- set up default location for the config file
 local configPath = "/opt/local/etc/flip/flip.conf"
@@ -51,58 +53,13 @@ else
 
 		config.key = config.key:sub(0,32) .. string.rep("0",32 - math.min(32,config.key:len()))
 
-		ensure(config.cluster,'cluster')
-		ensure(config.cluster.system,'cluster.system')
-		ensure(config.servers[config.id],nil
-					,"this server is not in the server config block",config.id
-					,config.servers)
-
-		
-		-- default quorum might be needed
-		if not config.quorum then
-			local server_count = 0
-			for _id,_value in pairs(config.servers) do
-				server_count = server_count + 1
-			end
-			config.quorum = math.floor(server_count/2) + 1
-		end
-
-		-- we make server an array so that they can be sorted
-	local servers = {}
-	for id,value in pairs(config.servers) do
-		value.id = id
-		servers[#servers + 1] = value
-	end
-
-	-- we sort these so that we can ensure that they are the same across
-	-- all nodes, they are sorted by priority, and then by id
-	table.sort(servers,function(mem1,mem2) 
-		return
-			(mem1.priority and mem2.priority and (mem1.priority < mem2.priority))
-			or
-			(mem1.priority and not mem2.priority)
-			or
-			(not mem1.priority and not mem2.priority and (mem1.id < mem2.id))
-	end)
-	config.sorted_servers = servers
-
-		-- we need to merge all the configs together
-		for key,value in pairs(config.cluster.system) do
-			local merged = {}
-			if config.cluster.config then
-				for k,v in pairs(config.cluster.config) do
-					merged[k] = v
-				end
-			end
-
-			if value.config then
-				for k,v in pairs(value.config) do
-					merged[k] = v
-				end
-			end
-
-			value.config = merged
-		end
+		ensure(config.id,'id')
+		ensure(config.gossip,'gossip')
+		ensure(config.gossip.ip,'gossip.ip')
+		ensure(config.gossip.port,'gossip.port')
+		ensure(config.api,'api')
+		ensure(config.api.ip,'api.ip')
+		ensure(config.api.port,'api.port')
 	end
 
 	-- load config file

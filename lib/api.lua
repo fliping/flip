@@ -15,6 +15,7 @@ local logger = require('./logger')
 local JSON = require('json')
 local Lever = require('lever')
 local utils = require('utils')
+local table = require('table')
 
 local Readable = Lever.Stream.Readable
 local Start = Readable:extend()
@@ -42,6 +43,18 @@ function Api:initialize(flip,port,ip)
 	self.status
 		:pipe(self.lever.json())
 		:pipe(self.lever:get('/cluster/stream'))
+
+	-- kv-store
+	self.lever:get('/store/?bucket'
+		,function(req,res) self:fetch(req,res) end)
+	self.lever:get('/store/?bucket/?id'
+		,function(req,res) self:fetch(req,res) end)
+	self.lever:post('/store/?bucket/?id'
+		,function(req,res) self:post(req,res) end)
+	self.lever:delete('/store/?bucket/?id'
+		,function(req,res) self:delete(req,res) end)
+	self.lever:post('/join-cluster/?ip/?port'
+		,function(req,res) self:join_cluster(req,res) end)
 
 end
 
@@ -73,6 +86,85 @@ function Api:system_status(req,res)
 	end
 	res:writeHead(200,{})
   res:finish(JSON.stringify(data))
+end
+
+
+function Api:fetch(req,res)
+	logger:info("fetch",req.env.bucket,req.env.id)
+	local object,err = self.flip.store:fetch(req.env.bucket,req.env.id)
+	if err then
+		local code = self:error_code(err)
+		res:writeHead(code,{})
+		res:finish(JSON.stringify({error = err}))
+	else
+		res:writeHead(200,{})
+		res:finish(JSON.stringify(object))
+	end
+end
+
+function Api:post(req,res)
+	logger:info("post",req.env.bucket,req.env.id)
+	local chunks = {}
+	
+	req:on('data',function(chunk)
+		chunks[#chunks + 1] = chunk
+	end)
+	
+	req:on('end',function()
+
+		local data = JSON.parse(table.concat(chunks))
+		local last_known = req.headers["last-known-update"] or data.last_updated
+		logger:info("got ",data,last_known)
+		
+		local object,err = self.flip.store:store(req.env.bucket,req.env.id,data,last_known)
+		if err then
+			local code = self:error_code(err)
+			res:writeHead(code,{})
+			res:finish(JSON.stringify({error = err,updated = object}))
+		else
+			res:writeHead(201,{})
+			res:finish(JSON.stringify(object))
+		end
+	end)
+end
+
+function Api:delete(req,res)
+	local last_known = 0 + req.headers["last-known-update"]
+	logger:info("delete",req.env.bucket,req.env.id,last_known)
+	
+	local updated,err = self.flip.store:delete(req.env.bucket,req.env.id,last_known)
+	if err then
+		local code = self:error_code(err)
+		res:writeHead(code,{})
+		res:finish(JSON.stringify({error = err,updated = updated}))
+	else
+		res:writeHead(204,{})
+		res:finish()
+	end
+end
+
+
+function Api:join_cluster(req,res)
+	self.flip.store:slave_of(req.env.ip,req.env.port,function(err)
+		if err then
+			local code = self:error_code(err)
+			res:writeHead(code,{})
+			res:finish(JSON.stringify({error = err}))
+		else
+			res:writeHead(200,{})
+			res:finish(JSON.stringify({status = "joined"}))
+		end
+	end)
+end
+
+function Api:error_code(err)
+	if (err == "not found") then
+		return 404
+	elseif (err == "try again") then
+		return 400
+	else
+		return 500
+	end
 end
 
 return Api

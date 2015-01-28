@@ -19,7 +19,74 @@ local topologies = require('./topologies/topologies')
 
 local Plan = Emitter:extend()
 
-function Plan:initialize(system,id)
+function Plan:initialize(system,name,id)
+	self.name = name
+	self.id = id
+	self.enabled = false
+	self.plan = {}
+	self.members = {}
+	self.alive = {}
+	
+	-- we expose the ability to remove all data on start
+	-- it defaults to removing the data
+	self.mature = system.remove_on_start
+	if self.mature == nil then
+		self.mature = false
+	end
+	self:update(system)
+end
+
+function Plan:add_member(member)
+	idx = #self.members + 1
+	member.plan_idxs[self.name] = idx
+	self.members[idx] =  member
+	self.alive[idx] = not(member.state == 'down')
+
+	local plan = self
+	local bind_id = function(an_id)
+		return function(_member,state)
+			if state == 'alive' then
+				self.alive[an_id] = true
+			elseif state == 'down' then
+				self.alive[an_id] = false
+			else
+				return
+			end
+
+			-- one of the members changed state
+			-- create a new generation of this plan
+			plan:next_plan()
+		end
+	end
+	member:on('state_change',bind_id(idx))
+
+	-- we added a new member, we need to regenerate the plan
+	plan:next_plan()
+end
+
+function Plan:remove_member(member)
+	local idx = member.plan_idxs[self.name]
+	table.remove(self.members,idx)
+	table.remove(self.alive,idx)
+	
+	-- now we need to correct the ids of the members stored after this
+	-- this member
+	for i = idx, #self.members do
+		local a_member = self.members[i]
+		a_member.plan_idxs[self.name] = a_member.plan_idxs[self.name] - 1
+	end
+
+	-- we added a new member, we need to regenerate the plan
+	self:next_plan()
+end
+
+function Plan:disable(cb)
+	self:_run('down',self.plan,function()
+		cb()
+	end)
+end
+
+function Plan:update(system)
 	local Topology = topologies[system.type]
 	if not Topology then
 		logger:fatal("unknown data distribution type",system.type)
@@ -30,99 +97,62 @@ function Plan:initialize(system,id)
 	-- have the topology divide it between then nodes. right now I do
 	-- nothing
 	self.topology = Topology:new()
-
 	self.system = system
-	self.id = id
-	self.plan = {}
-	self.members = {}
-	self.alive = {}
+	
 	self.new_plan_delay = system.delay
 	if not self.new_plan_delay then
 		self.new_plan_delay = 500
 	end
 
-	-- we expose the ability to remove all data on start
-	-- it defaults to removing the data
-	self.mature = system.remove_on_start
-	if self.mature == nil then
-		self.mature = false
-	end
-
 	-- this only works on strings,
 	table.sort(system.data)
-end
-
-function Plan:add_member(member)
-	self.members[#self.members + 1] =  member
-	-- all members start out alive
-	self.alive[#self.members] = true
-end
-
-function Plan:disable(cb)
-	self:_run('down',self.plan,function()
-		cb()
-	end)
+	self:next_plan()
 end
 
 function Plan:enable()
-	local plan = self
-	-- when members change their state, we need to have a new plan built
+	logger:info("enabling plan",self.id)
+	self.enabled = true
 	for id,member in pairs(self.members) do
-
-		-- instead of the actual id of the node, we want to store its 
-		-- numeric order
+		-- we want to grab the member that represents this node so that
+		-- we can always have the correct index
 		if member.id == self.id then
-			self.id = id
+			self.this_member = member
 		end
-		local bind_id = function(an_id)
-			return function(_member,state)
-				if state == 'alive' then
-					self.alive[an_id] = true
-				elseif state == 'down' then
-					self.alive[an_id] = false
-				else
-					return
-				end
-
-				-- one of the members changed state
-				-- create a new generation of this plan
-				plan:next_plan()
-			end
-		end
-		member:on('state_change',bind_id(id))
 	end
+	self:next_plan()
 end
 
 function Plan:next_plan()
+	if self.enabled then
+		-- we ask the topology what data points are needed
+		local add,remove = self.topology:divide(self.system.data
+																		,self.this_member.plan_idxs[self.name],self.alive)
 
-	-- we ask the topology what data points are needed
-	local add,remove = self.topology:divide(self.system.data
-																	,self.id,self.alive)
+		local new_plan = {add = add,remove = remove}
 
-	local new_plan = {add = add,remove = remove}
+		-- a plan was made and is still waiting to be run, we have a new one
+		-- so lets clear it out
+		if self.plan_activation_timer then
+			logger:debug("clearing timer")
 
-	-- a plan was made and is still waiting to be run, we have a new one
-	-- so lets clear it out
-	if self.plan_activation_timer then
-		logger:debug("clearing timer")
+			timer.clearTimer(self.plan_activation_timer)
+		end
 
-		timer.clearTimer(self.plan_activation_timer)
-	end
+		if self.queue then
+			-- we are currently running scripts, lets wait for them to be done
+			self.queue = new_plan
+		else
 
-	if self.queue then
-		-- we are currently running scripts, lets wait for them to be done
-		self.queue = new_plan
-	else
-
-		-- we delay how long it takes for a new plan to be put in place
-		-- so that if any members change at the exact smae time, the 
-		-- changes get pulled into a single plan update
-		logger:debug("setting plan",new_plan)
-		local me = self
-		self.plan_activation_timer = timer.setTimeout(self.new_plan_delay,function(a_plan)
-			me.plan_activation_timer = nil
-			me:compute(a_plan)
-		end,new_plan)
+			-- we delay how long it takes for a new plan to be put in place
+			-- so that if any members change at the exact smae time, the 
+			-- changes get pulled into a single plan update
+			logger:debug("setting plan",new_plan)
+			local me = self
+			self.plan_activation_timer = timer.setTimeout(self.new_plan_delay,function(a_plan)
+				me.plan_activation_timer = nil
+				me:compute(a_plan)
+			end,new_plan)
+		end
 	end
 end
 
@@ -249,7 +279,7 @@ function Plan:run()
 				-- if not, lets end
 				self.queue = nil
 				logger:info("current plan",self.plan)
-			else
+			elseif not(self.queue == nil) then
 				-- if there is another thing queued up to run,
 				-- lets run it
 				logger:debug("running next set of jobs",self.queue.add)
@@ -269,24 +299,27 @@ function Plan:_run(state,data,cb)
 		-- inform the api of changes
 		-- local change = {type:"assign data",data:{state:state value:value}}
 		-- self:publish('api',change)
+		if sys[state] then
+			local child = spawn(sys[state],{value,JSON.stringify(sys.config)})
+			
+			child.stdout:on('data', function(chunk)
+				logger:debug("got",chunk)
+			end)
 
-		local child = spawn(sys[state],{value,JSON.stringify(sys.config)})
-		
-		child.stdout:on('data', function(chunk)
-			logger:debug("got",chunk)
-		end)
-
-		child:on('exit', function(code,other)
-			count = count - 1
-			if not (code == 0 ) then
-				logger:error("script failed",sys[state],{value,JSON.stringify(sys.config)})
-			else
-				logger:info("script worked",sys[state],{value,JSON.stringify(sys.config)})
-			end
-			if count == 0 and cb then
-				cb()
-			end
-		end)
+			child:on('exit', function(code,other)
+				count = count - 1
+				if not (code == 0 ) then
+					logger:error("script failed",sys[state],{value,JSON.stringify(sys.config)})
+				else
+					logger:info("script worked",sys[state],{value,JSON.stringify(sys.config)})
+				end
+				if count == 0 and cb then
+					cb()
+				end
+			end)
+		else
+			cb()
+		end
 
 	end
 	if count == 0 then

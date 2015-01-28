@@ -20,27 +20,39 @@ local system = require('./system')
 
 local Member = Emitter:extend()
 
-function Member:initialize(config,global)
+function Member:initialize(id,config,global)
 	self.config = global
 	self.state = 'new'
 	self.last_check = hrtime()
 	self.last_send = hrtime()
+	self.id = id
 	self.seq = -1
 	self.packet_seq = 0
-	self.ip = config.ip
-	self.port = config.port
-	self.id = config.id
-	self.systems = config.systems
-	self.opts = config.opts
-	if not self.systems then
-		self.systems = {}
-	end
+	self:update(config)
 	logger:debug('created member',config)
 	self.probed = {}
 end
 
 function Member:enable()
 	self:emit('state_change',self,'new')
+end
+
+function Member:update(config)
+	self.ip = config.ip
+	self.port = config.port
+	self.systems = config.systems
+	self.opts = config.opts
+	self.plan_idxs = {}
+	if not self.systems then
+		self.systems = {}
+	end
+	if not self.opts then
+		self.opts = {}
+	end
+end
+
+function Member:destroy()
+	self:removeListener()
 end
 
 function Member:probe(who)
