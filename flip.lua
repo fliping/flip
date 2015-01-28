@@ -37,20 +37,6 @@ function Flip:initialize(config)
 	----
 	-- this needs to be reworked.
 	----
-	
-	-- for idx,opts in pairs(config.sorted_servers) do
-		
-	-- 	-- everything starts out alive
-	-- 	self.alive[idx] = true
-
-	-- 	member = Member:new(opts,config)
-	-- 	self.system:add_member(member)
-	-- 	self:add_member(member)
-	-- 	member:on('state_change',function(...) self:track(idx,...) end)
-	-- 	if member.id == config.id then
-	-- 		self.id = idx
-	-- 	end
-	-- end
 	-- create a unique id for this store. bascially a UUID
 	self.store = Store:new({node = config.id,time = hrtime(),random = math.random(100000)})
 end
@@ -110,8 +96,10 @@ function Flip:start()
 	end)
 end
 
+-- This function handles updates from the store for members
+-- as member data changes, systems added/removed etc, this function
+-- will be passed in the changes.
 function Flip:process_server_update(kind,id,data)
-	logger:info("processing",kind,id,data)
 	if kind == "store" then
 		local member = self.members[id]
 		if member then

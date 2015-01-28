@@ -102,7 +102,6 @@ function System:remove_member(member)
 end
 
 function System:check_system(kind,id,system_config) 
-	logger:info("checking system",kind,id,system_config)
 	if kind == "store" then
 		local plan = self.plans[id]
 		if plan then

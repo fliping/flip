@@ -45,6 +45,8 @@ function Api:initialize(flip,port,ip)
 		:pipe(self.lever:get('/cluster/stream'))
 
 	-- kv-store
+	self.lever:get('/store/sync/?version'
+		,function(req,res) self:sync(req,res) end)
 	self.lever:get('/store/?bucket'
 		,function(req,res) self:fetch(req,res) end)
 	self.lever:get('/store/?bucket/?id'
@@ -53,7 +55,9 @@ function Api:initialize(flip,port,ip)
 		,function(req,res) self:post(req,res) end)
 	self.lever:delete('/store/?bucket/?id'
 		,function(req,res) self:delete(req,res) end)
-	self.lever:post('/join-cluster/?ip/?port'
+
+	-- kv-store actions
+	self.lever:post('/cluster/join/?ip/?port'
 		,function(req,res) self:join_cluster(req,res) end)
 
 end
@@ -114,7 +118,6 @@ function Api:post(req,res)
 
 		local data = JSON.parse(table.concat(chunks))
 		local last_known = req.headers["last-known-update"] or data.last_updated
-		logger:info("got ",data,last_known)
 		
 		local object,err = self.flip.store:store(req.env.bucket,req.env.id,data,last_known)
 		if err then
@@ -155,6 +158,20 @@ function Api:join_cluster(req,res)
 			res:finish(JSON.stringify({status = "joined"}))
 		end
 	end)
+end
+
+function Api:sync(req,res)
+	local sync,err = self.flip.store:to_json(req.env.version)
+	if err then
+		local code = self:error_code(err)
+		res:writeHead(code,{})
+		res:finish(JSON.stringify({error = err}))
+	else
+		res:writeHead(200,{})
+		sync:on('event',function(object)
+			res:write(JSON.stringify(object))
+		end)
+	end
 end
 
 function Api:error_code(err)
