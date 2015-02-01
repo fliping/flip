@@ -9,13 +9,9 @@
 -- Created :   19 Nov 2014 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
-
-local Emitter = require('core').Emitter
-local Sharded = Emitter:extend()
-
 -- sharded evenly divides the data over all nodes in the cluster. when
 -- one node is down, the data is divided over the remaining nodes
-function Sharded:divide(data,id,is_alive)
+return function (data,id,is_alive)
 	local add = {}
 	local remove = {}
 	local idx = 0
@@ -61,5 +57,3 @@ function Sharded:divide(data,id,is_alive)
 
 	return add,remove
 end
-
-return Sharded

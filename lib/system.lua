@@ -16,10 +16,10 @@ local Emitter = require('core').Emitter
 local logger = require('./logger')
 
 local System = Emitter:extend()
-function System:initialize(store,id)
+function System:initialize(store,node_id)
 	self.store = store
 	self.plans = {}
-	self.id = id
+	self.node_id = node_id
 	self.enabled = false
 end
 
@@ -58,7 +58,7 @@ function System:update_member(member)
 		end
 	end
 
-	if member.id == self.id then
+	if member.id == self.node_id then
 		-- we need to start any new plans
 		-- and destroy any old plans
 		-- but only if we are enabled
@@ -72,7 +72,6 @@ function System:update_member(member)
 				if not plan then
 					logger:warning("unable to start non existant plan")
 				else
-					logger:info("enabling a plan",plan)
 					plan:enable()
 				end
 			end
@@ -84,7 +83,7 @@ end
 
 function System:remove_member(member)
 	-- can we ever remove this server as a member? probably on shut down
-	if member.id == self.id then
+	if member.id == self.node_id then
 		if self.enabled then
 			self:disable(
 				function() logger:info("this server has been removed from the cluster.")
@@ -108,7 +107,7 @@ function System:check_system(kind,id,system_config)
 			plan:update(system_config)
 			logger:info("updated plan:",id)
 		else
-			self.plans[id] = Plan:new(system_config,id,self.id)
+			self.plans[id] = Plan:new(system_config,id,self.node_id,self.store)
 			logger:info("created plan:",id)
 		end
 	elseif kind == "delete" then
@@ -132,8 +131,9 @@ function System:enable()
 			systems = {}
 		end
 
+		
 		for sys_id,system_config in pairs(systems) do
-			self.plans[sys_id] = Plan:new(sys_config)
+			self.plans[sys_id] = Plan:new(system_config,sys_id,self.node_id,self.store)
 		end
 
 		self.store:on("systems",function(kind,id,system_config) self:check_system(kind,id,system_config) end)

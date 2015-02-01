@@ -6,8 +6,8 @@
 -- @doc
 --
 -- @end
--- Created :   19 Nov 2014 by Daniel Barney <daniel@pagodabox.com>
+-- Created :   30 Jan 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
-return
-	{shard = require('./sharded')
-	,replicate = require('./replicated')}
+return function(data,id,is_alive)
+	return {1},{}
+end

@@ -15,12 +15,11 @@ local spawn = require('childprocess').spawn
 local timer = require('timer')
 local logger = require('../logger')
 
-local topologies = require('./topologies/topologies')
-
 local Plan = Emitter:extend()
 
-function Plan:initialize(system,name,id)
-	self.name = name
+function Plan:initialize(system,sys_name,id,store)
+	self.store = store
+	self.sys_name = sys_name
 	self.id = id
 	self.enabled = false
 	self.plan = {}
@@ -38,7 +37,7 @@ end
 
 function Plan:add_member(member)
 	idx = #self.members + 1
-	member.plan_idxs[self.name] = idx
+	member.plan_idxs[self.sys_name] = idx
 	self.members[idx] =  member
 	self.alive[idx] = not(member.state == 'down')
 
@@ -65,7 +64,7 @@ function Plan:add_member(member)
 end
 
 function Plan:remove_member(member)
-	local idx = member.plan_idxs[self.name]
+	local idx = member.plan_idxs[self.sys_name]
 	table.remove(self.members,idx)
 	table.remove(self.alive,idx)
 	
@@ -73,7 +72,7 @@ function Plan:remove_member(member)
 	-- this member
 	for i = idx, #self.members do
 		local a_member = self.members[i]
-		a_member.plan_idxs[self.name] = a_member.plan_idxs[self.name] - 1
+		a_member.plan_idxs[self.sys_name] = a_member.plan_idxs[self.sys_name] - 1
 	end
 
 	-- we added a new member, we need to regenerate the plan
@@ -87,16 +86,15 @@ function Plan:disable(cb)
 end
 
 function Plan:update(system)
-	local Topology = topologies[system.type]
-	if not Topology then
-		logger:fatal("unknown data distribution type",system.type)
-		process:exit(1)
+	local topology,err = self.store:fetch("topologies",system.type)
+	if err then
+		logger:fatal("unknown data distribution type",system.type,err)
+		process.exit(1)
 	end
 
 	-- In future topologies, I might need to prepare the data before I 
 	-- have the topology divide it between then nodes. right now I do
 	-- nothing
-	self.topology = Topology:new()
 	self.system = system
 	
 	self.new_plan_delay = system.delay
@@ -104,13 +102,11 @@ function Plan:update(system)
 		self.new_plan_delay = 500
 	end
 
-	-- this only works on strings,
-	table.sort(system.data)
 	self:next_plan()
 end
 
 function Plan:enable()
-	logger:info("enabling plan",self.id)
+	logger:info("enabling plan for ",self.sys_name)
 	self.enabled = true
 	for id,member in pairs(self.members) do
 		-- we want to grab the member that represents this node so that
@@ -124,34 +120,39 @@ end
 
 function Plan:next_plan()
 	if self.enabled then
-		-- we ask the topology what data points are needed
-		local add,remove = self.topology:divide(self.system.data
-																		,self.this_member.plan_idxs[self.name],self.alive)
-
-		local new_plan = {add = add,remove = remove}
-
-		-- a plan was made and is still waiting to be run, we have a new one
-		-- so lets clear it out
-		if self.plan_activation_timer then
-			logger:debug("clearing timer")
-
-			timer.clearTimer(self.plan_activation_timer)
-		end
-
-		if self.queue then
-			-- we are currently running scripts, lets wait for them to be done
-			self.queue = new_plan
+		local topology,err = self.store:fetch('topologies',self.system.type)
+		if err then
+			logger:warning("topology was not found",self.system.type)
 		else
+			-- we ask the topology what data points are needed
+			local add,remove = topology.script()(self.system.data
+																			,self.this_member.plan_idxs[self.sys_name],self.alive)
 
-			-- we delay how long it takes for a new plan to be put in place
-			-- so that if any members change at the exact smae time, the 
-			-- changes get pulled into a single plan update
-			logger:debug("setting plan",new_plan)
-			local me = self
-			self.plan_activation_timer = timer.setTimeout(self.new_plan_delay,function(a_plan)
-				me.plan_activation_timer = nil
-				me:compute(a_plan)
-			end,new_plan)
+			local new_plan = {add = add,remove = remove}
+
+			-- a plan was made and is still waiting to be run, we have a new one
+			-- so lets clear it out
+			if self.plan_activation_timer then
+				logger:debug("clearing timer")
+
+				timer.clearTimer(self.plan_activation_timer)
+			end
+
+			if self.queue then
+				-- we are currently running scripts, lets wait for them to be done
+				self.queue = new_plan
+			else
+
+				-- we delay how long it takes for a new plan to be put in place
+				-- so that if any members change at the exact smae time, the 
+				-- changes get pulled into a single plan update
+				logger:debug("setting plan",new_plan)
+				local me = self
+				self.plan_activation_timer = timer.setTimeout(self.new_plan_delay,function(a_plan)
+					me.plan_activation_timer = nil
+					me:compute(a_plan)
+				end,new_plan)
+			end
 		end
 	end
 end
@@ -295,36 +296,54 @@ end
 function Plan:_run(state,data,cb)
 	local sys = self.system
 	local count = #data
-	for idx,value in pairs(data) do
-		-- inform the api of changes
-		-- local change = {type:"assign data",data:{state:state value:value}}
-		-- self:publish('api',change)
-		if sys[state] then
-			local child = spawn(sys[state],{value,JSON.stringify(sys.config)})
-			
-			child.stdout:on('data', function(chunk)
-				logger:debug("got",chunk)
-			end)
 
-			child:on('exit', function(code,other)
-				count = count - 1
-				if not (code == 0 ) then
-					logger:error("script failed",sys[state],{value,JSON.stringify(sys.config)})
-				else
-					logger:info("script worked",sys[state],{value,JSON.stringify(sys.config)})
-				end
-				if count == 0 and cb then
-					cb()
-				end
-			end)
+	if count == 0 then
+		process.nextTick(cb)
+		return
+	end
+
+	local cmd = sys[state]
+	if cmd then
+		if type(cmd) == "function" then
+			cmd(value,sys.config,cb)
+
+		elseif cmd:sub(1,1) == '$' then
+			for idx,value in pairs(data) do
+				-- inform the api of changes
+				-- local change = {type:"assign data",data:{state:state value:value}}
+				-- self:publish('api',change)
+				
+	 			local child = spawn(cmd:sub(1,cmd:len()),{value,JSON.stringify(sys.config)})
+				
+				child.stdout:on('data', function(chunk)
+					logger:debug("got",chunk)
+				end)
+
+				child:on('exit', function(code,other)
+					count = count - 1
+					if not (code == 0 ) then
+						logger:error("script failed",cmd,{value,JSON.stringify(sys.config)})
+					else
+						logger:info("script worked",cmd,{value,JSON.stringify(sys.config)})
+					end
+					if count == 0 and cb then
+						cb()
+					end
+				end)
+			end
+		else
+			local script,err = self.store:fetch(self.sys_name,cmd)
+			if err then
+				logger:warning("unable to find script in store",self.sys_name,cmd)
+				cb()
+			else
+				logger:info("running ",self.sys_name,cmd)
+				script.script()(data,cb)
+			end
+		end
 		else
 			cb()
 		end
-
-	end
-	if count == 0 then
-		process.nextTick(cb)
-	end
 end
 
 return Plan

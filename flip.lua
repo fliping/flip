@@ -38,14 +38,14 @@ function Flip:initialize(config)
 	-- this needs to be reworked.
 	----
 	-- create a unique id for this store. bascially a UUID
-	self.store = Store:new({node = config.id,time = hrtime(),random = math.random(100000)})
+	self.store = Store:new(config.id,{node = config.id,time = hrtime(),random = math.random(100000)})
 end
 
 function Flip:start()
 	-- we create a system so that it is setup by the time that servers
 	-- are added in, it starts working and creating plans
 	self.system = System:new(self.store,self.config.id)
-	self.system:enable()
+	
 
 	-- we also want all servers to be setup correctly by the time we
 	-- set this server to be active
@@ -53,14 +53,16 @@ function Flip:start()
 
 	self.store:open(function(err)
 		if not err then
+			self.system:enable()
 
-			-- if there are not servers, then this is a new cluter.
-			-- lets set it up
-			local members,err = self.store:fetch("servers",nil)
+			-- if I'm not a member of the server, lets set that up.
+			logger:info("storing myself",self.id)
+			local members,err = self.store:fetch("servers",self.id)
 			if err == "not found" then
 				me = 
 					{ip = self.config.gossip.ip
-					,port = self.config.gossip.port}
+					,port = self.config.gossip.port
+					,systems = {'store'}}
 				local object,err = self.store:store("servers",self.config.id,me)
 				if err then
 					logger:error("unable to create cluster: ",err)
@@ -100,6 +102,7 @@ end
 -- as member data changes, systems added/removed etc, this function
 -- will be passed in the changes.
 function Flip:process_server_update(kind,id,data)
+	logger:info("server update",kind,id,data)
 	if kind == "store" then
 		local member = self.members[id]
 		if member then
@@ -124,12 +127,14 @@ end
 function Flip:find_member(key)
 	local server
 	if type(key) == "number" then
+
 		server = self.store:fetch_idx("servers",key)
 	else
 		server =  self.store:fetch("servers",key)
 	end
 
 	if server then
+		logger:info("mapped",key,server.id)
 		return self.members[server.id]
 	end
 end
@@ -227,7 +232,7 @@ end
 
 function Flip:ping(seq,id,nodes)
 	local member = self:find_member(id)
-
+	logger:info('got ping',id)
 	if member then
 		member:alive(seq)
 		if member:needs_ping() then
