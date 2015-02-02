@@ -38,13 +38,13 @@ function Flip:initialize(config)
 	-- this needs to be reworked.
 	----
 	-- create a unique id for this store. bascially a UUID
-	self.store = Store:new(config.id,{node = config.id,time = hrtime(),random = math.random(100000)})
+	self.store = Store:new(config.id,{node = config.id,time = hrtime(),random = math.random(100000)},config.api.api,config.api.port,self.api)
 end
 
 function Flip:start()
 	-- we create a system so that it is setup by the time that servers
 	-- are added in, it starts working and creating plans
-	self.system = System:new(self.store,self.config.id)
+	self.system = System:new(self.store,self)
 	
 
 	-- we also want all servers to be setup correctly by the time we
@@ -53,7 +53,6 @@ function Flip:start()
 
 	self.store:open(function(err)
 		if not err then
-			self.system:enable()
 
 			-- if I'm not a member of the server, lets set that up.
 			logger:info("storing myself",self.id)
@@ -72,6 +71,9 @@ function Flip:start()
 				logger:error("unable to access store: ",err)
 				process.exit(1)
 			end
+
+			-- now that we have been added in, lets start up the system
+			self.system:enable()
 
 			-- we set ourself to be alive. This probably should be a quorum
 			-- decision TODO
@@ -113,29 +115,24 @@ function Flip:process_server_update(kind,id,data)
 			member:on('state_change',function(...) self:track(id,...) end)
 			member:enable()
 		end
-		self.system:update_member(member)
+		self.system:regen(data.systems)
 	elseif kind == "delete" then
 		local member = self.members[id]
 		self.members[id] = nil
 		if member then
-			self.system:remove_member(member)
 			member:destroy()
 		end
+		self.system:regen(data.systems)
 	end
 end
 
 function Flip:find_member(key)
-	local server
 	if type(key) == "number" then
-
-		server = self.store:fetch_idx("servers",key)
-	else
-		server =  self.store:fetch("servers",key)
-	end
-
-	if server then
-		logger:info("mapped",key,server.id)
+		local server = self.store:fetch_idx("servers",key)
 		return self.members[server.id]
+	else
+		-- server =  self.store:fetch("servers",key)
+		return self.members[key]
 	end
 end
 
@@ -232,7 +229,7 @@ end
 
 function Flip:ping(seq,id,nodes)
 	local member = self:find_member(id)
-	logger:info('got ping',id)
+	logger:debug('got ping',id)
 	if member then
 		member:alive(seq)
 		if member:needs_ping() then
@@ -266,6 +263,12 @@ function Flip:track(id,member,new_state)
 		logger:info("member doesn't exist anymore")
 		process.exit(1)
 	end
+	
+	-- we need to regenerate all the systems that are on this member
+	if (new_state == 'alive') or (new_state == 'down') then
+		timer.setTimeout(0,function() self.system:regen(server.systems) end)
+	end
+
 	-- this is used to build the packets
 	if new_state == 'alive' then
 		self.alive[server.idx] = true

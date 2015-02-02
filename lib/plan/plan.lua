@@ -17,13 +17,14 @@ local logger = require('../logger')
 
 local Plan = Emitter:extend()
 
-function Plan:initialize(system,sys_name,id,store)
+function Plan:initialize(system,sys_name,flip,store)
 	self.store = store
 	self.sys_name = sys_name
-	self.id = id
+	self.flip = flip
 	self.enabled = false
 	self.plan = {}
 	self.members = {}
+	self.member_map = {}
 	self.alive = {}
 	
 	-- we expose the ability to remove all data on start
@@ -35,55 +36,19 @@ function Plan:initialize(system,sys_name,id,store)
 	self:update(system)
 end
 
-function Plan:add_member(member)
-	idx = #self.members + 1
-	member.plan_idxs[self.sys_name] = idx
-	self.members[idx] =  member
-	self.alive[idx] = not(member.state == 'down')
-
-	local plan = self
-	local bind_id = function(an_id)
-		return function(_member,state)
-			if state == 'alive' then
-				self.alive[an_id] = true
-			elseif state == 'down' then
-				self.alive[an_id] = false
-			else
-				return
-			end
-
-			-- one of the members changed state
-			-- create a new generation of this plan
-			plan:next_plan()
-		end
-	end
-	member:on('state_change',bind_id(idx))
-
-	-- we added a new member, we need to regenerate the plan
-	plan:next_plan()
-end
-
-function Plan:remove_member(member)
-	local idx = member.plan_idxs[self.sys_name]
-	table.remove(self.members,idx)
-	table.remove(self.alive,idx)
-	
-	-- now we need to correct the ids of the members stored after this
-	-- this member
-	for i = idx, #self.members do
-		local a_member = self.members[i]
-		a_member.plan_idxs[self.sys_name] = a_member.plan_idxs[self.sys_name] - 1
-	end
-
-	-- we added a new member, we need to regenerate the plan
-	self:next_plan()
-end
-
 function Plan:disable(cb)
+	self.enabled = false
 	self:_run('down',self.plan,function()
 		cb()
 	end)
 end
+
+function Plan:enable()
+	logger:info("enabling plan for ",self.sys_name)
+	self.enabled = true
+	self:next_plan()
+end
+
 
 function Plan:update(system)
 	local topology,err = self.store:fetch("topologies",system.type)
@@ -105,17 +70,28 @@ function Plan:update(system)
 	self:next_plan()
 end
 
-function Plan:enable()
-	logger:info("enabling plan for ",self.sys_name)
-	self.enabled = true
-	for id,member in pairs(self.members) do
-		-- we want to grab the member that represents this node so that
-		-- we can always have the correct index
-		if member.id == self.id then
-			self.this_member = member
+function Plan:fetch_members()
+	local servers,err = self.store:fetch_idx("servers")
+	if err then
+		return nil,nil,err
+	end
+	local members = {}
+	for _idx,server in pairs(servers) do
+		local systems = server.systems
+		if systems then
+			for _idx,sys_name in pairs(systems) do
+				if sys_name == self.sys_name then
+					local member = self.flip:find_member(server.id)
+					if member then
+						members[#members + 1] = not(member.state == 'down')
+						break
+					end
+				end
+			end
 		end
 	end
-	self:next_plan()
+	logger:debug("found members of system",members)
+	return members,1
 end
 
 function Plan:next_plan()
@@ -124,10 +100,14 @@ function Plan:next_plan()
 		if err then
 			logger:warning("topology was not found",self.system.type)
 		else
+			local alive,idx,err = self:fetch_members()
+			if err then
+				logger:warning("unable to start plan",err)
+				return 
+			end
 			-- we ask the topology what data points are needed
-			local add,remove = topology.script()(self.system.data
-																			,self.this_member.plan_idxs[self.sys_name],self.alive)
-
+			local add,remove = topology.script()(self.system.data,idx,alive)
+			logger:debug("toplogy returned",self.system.type,add,remove)
 			local new_plan = {add = add,remove = remove}
 
 			-- a plan was made and is still waiting to be run, we have a new one
@@ -279,7 +259,7 @@ function Plan:run()
 			if self.queue == true then
 				-- if not, lets end
 				self.queue = nil
-				logger:info("current plan",self.plan)
+				logger:info("current plan",self.sys_name,self.plan)
 			elseif not(self.queue == nil) then
 				-- if there is another thing queued up to run,
 				-- lets run it
@@ -309,9 +289,6 @@ function Plan:_run(state,data,cb)
 
 		elseif cmd:sub(1,1) == '$' then
 			for idx,value in pairs(data) do
-				-- inform the api of changes
-				-- local change = {type:"assign data",data:{state:state value:value}}
-				-- self:publish('api',change)
 				
 	 			local child = spawn(cmd:sub(1,cmd:len()),{value,JSON.stringify(sys.config)})
 				

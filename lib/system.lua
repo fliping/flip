@@ -16,10 +16,10 @@ local Emitter = require('core').Emitter
 local logger = require('./logger')
 
 local System = Emitter:extend()
-function System:initialize(store,node_id)
+function System:initialize(store,flip)
+	self.flip = flip
 	self.store = store
 	self.plans = {}
-	self.node_id = node_id
 	self.enabled = false
 end
 
@@ -48,66 +48,15 @@ function System:disable(cb)
 	end
 end
 
-function System:update_member(member)
-	for _idx,sys_id in pairs(member.systems) do
-		local plan = self.plans[sys_id]
-		if not plan then
-			logger:warning("plan must be created before added to a member")
-		else
-			plan:add_member(member)
-		end
-	end
-
-	if member.id == self.node_id then
-		-- we need to start any new plans
-		-- and destroy any old plans
-		-- but only if we are enabled
-		if self.enabled then
-			-- do some set magic
-			
-			-- still need to disable old plans
-
-			for _idx,sys_id in pairs(member.systems) do
-				local plan = self.plans[sys_id]
-				if not plan then
-					logger:warning("unable to start non existant plan")
-				else
-					plan:enable()
-				end
-			end
-		end
-	else
-		
-	end
-end
-
-function System:remove_member(member)
-	-- can we ever remove this server as a member? probably on shut down
-	if member.id == self.node_id then
-		if self.enabled then
-			self:disable(
-				function() logger:info("this server has been removed from the cluster.")
-			end)
-		end
-	else
-		for _idx,sys_id in pairs(member.systems) do
-			local plan = self.plans[sys_id]
-			if not(plan == nil) then
-				logger:info("no plan for system:",sys_id)
-				plan:remove_member(member)
-			end
-		end
-	end
-end
-
 function System:check_system(kind,id,system_config) 
+	logger:info(kind,id,system_config)
 	if kind == "store" then
 		local plan = self.plans[id]
 		if plan then
 			plan:update(system_config)
 			logger:info("updated plan:",id)
 		else
-			self.plans[id] = Plan:new(system_config,id,self.node_id,self.store)
+			self.plans[id] = Plan:new(system_config,id,self.flip,self.store)
 			logger:info("created plan:",id)
 		end
 	elseif kind == "delete" then
@@ -117,6 +66,18 @@ function System:check_system(kind,id,system_config)
 			plan:disable(function() 
 				logger:info("removed plan:",id)
 			end)
+		end
+	end
+end
+
+function System:regen(systems)
+	logger:info("Sytem is regeneration these systems",systems)
+	if systems then
+		for _idx,system in pairs(systems) do
+			local plan = self.plans[system]
+			if plan then
+				plan:next_plan()
+			end
 		end
 	end
 end
@@ -133,7 +94,11 @@ function System:enable()
 
 		
 		for sys_id,system_config in pairs(systems) do
-			self.plans[sys_id] = Plan:new(system_config,sys_id,self.node_id,self.store)
+			local plan = Plan:new(system_config,sys_id,self.flip,self.store)
+			self.plans[sys_id] = plan
+
+			-- this should only be enabled if I am a member of the system
+			plan:enable()
 		end
 
 		self.store:on("systems",function(kind,id,system_config) self:check_system(kind,id,system_config) end)

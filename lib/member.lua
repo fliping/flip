@@ -31,6 +31,7 @@ function Member:initialize(id,config,global)
 	self:update(config)
 	logger:debug('created member',config)
 	self.probed = {}
+	self.disable = {}
 end
 
 function Member:enable()

@@ -15,11 +15,13 @@ local JSON = require('json')
 local http = require('http')
 local Timer = require('timer')
 local fs = require('fs')
+local table = require('table')
 local hrtime = require('uv').Process.hrtime
 
 local Store = Emitter:extend()
 
-function Store:initialize(id,version,ip,port)
+function Store:initialize(id,version,ip,port,api)
+	self.api = api
 	self.id = id
 	self.version = version
 	self.storage = {
@@ -32,38 +34,39 @@ function Store:initialize(id,version,ip,port)
 	self.master = {}
 end
 
-function Store:open(cb)
-	local alive = 
-		{["$script"] = 
-[[
-return function(data,cb)
-	local member,err = store:fetch_idx("servers",data[1])
-	if (store.ip == member.ip) and (store.port == member.port) then
-		store:slave_of(member.ip,member.port,cb)
-	else
-		store:promote_to_master(cb)
-	end
+function Store:load_from_disk()
+	return false
 end
-]]}
 
-	local default = {
-		alive = "update_master",
-		["type"] = "choose_one"}
-	self:_store(self.storage,"store","update_master",alive,0,false,true)
-	self:_store(self.storage,"systems","store",default,0,false,true)
+function Store:open(cb)
+	if self:load_from_disk() then
+		logger:info("store loaded from disk")
+	else
+		logger:info("bootstrapping store")
 
-	local replicated = 
-		{["$script"] = fs.readFileSync('./lib/plan/topologies/replicated.lua')}
-	local round_robin = 
-		{["$script"] = fs.readFileSync('./lib/plan/topologies/round_robin.lua')}
-	local choose_one = 
-		{["$script"] = fs.readFileSync('./lib/plan/topologies/choose_one.lua')}
+		local alive = 
+			{["$script"] = fs.readFileSync('./lib/store/alive.lua')}
 
-	assert(self:_store(self.storage,"topologies","replicated",replicated,0,false,true))
-	assert(self:_store(self.storage,"topologies","round_robin",round_robin,0,false,true))
-	assert(self:_store(self.storage,"topologies","choose_one",choose_one,0,false,true))
-	logger:info('loaded store from disk')
-	cb()
+		local default = {
+			["$init"] = fs.readFileSync('./lib/store/init.lua'),
+			alive = "update_master",
+			["type"] = "choose_one"}
+		self:_store(self.storage,"store","update_master",alive,0,false,true)
+		self:_store(self.storage,"systems","store",default,0,false,true)
+
+		local replicated = 
+			{["$script"] = fs.readFileSync('./lib/plan/topologies/replicated.lua')}
+		local round_robin = 
+			{["$script"] = fs.readFileSync('./lib/plan/topologies/round_robin.lua')}
+		local choose_one = 
+			{["$script"] = fs.readFileSync('./lib/plan/topologies/choose_one.lua')}
+
+		assert(self:_store(self.storage,"topologies","replicated",replicated,0,false,true))
+		assert(self:_store(self.storage,"topologies","round_robin",round_robin,0,false,true))
+		assert(self:_store(self.storage,"topologies","choose_one",choose_one,0,false,true))
+		logger:info('loaded store from disk')
+		cb()
+	end
 end
 
 function Store:slave_of(ip,port,cb)
@@ -169,19 +172,20 @@ function Store:_store(store,b_id,id,data,last_known,sync,broadcast)
 		end
 	end
 	data.id = id
-	local compiled,err = self:compile(data,b_id,id)
+	local err = self:compile(data,b_id,id)
 	if err then
 		return nil,err
 	else
-		bucket[id] = compiled
-		bucket_idx[compiled.idx] = compiled
+		self:install(data,b_id,id)
+		bucket[id] = data
+		bucket_idx[data.idx] = data
 		logger:info(bucket_idx,sync)
 		if broadcast then
 			logger:info("broadcasting",data)
 			self:emit(b_id,"store",id,data)
 			self:emit("all",b_id,"store",id,data)
 		end
-		return compiled
+		return data
 	end
 end
 
@@ -222,19 +226,50 @@ end
 
 function Store:compile(data,bucket,id)
 	local script = data["$script"]
+	local env =
+			{__filename = id
+			,__dirname = bucket
+			,pairs = pairs
+			,store = self
+			,logger = logger}
+	local fn,err = self:build(data,script,env,bucket,id)
+	if err then
+		return err
+	end
+	data.script = fn
+end
+
+function Store:install(data,bucket,id)
+
+	local script = data["$init"]
+	local env = 
+			{__filename = id
+			,__dirname = bucket
+			,pairs = pairs
+			,store = self
+			,logger = logger
+			,lever = self.api.lever
+			,JSON = JSON
+			,error_code = self.api.error_code
+			,table = table}
+	local fn,err = self:build(data,script,env,bucket,id)
+	if err then
+		return err
+	end
+	if fn then
+		fn()
+	end
+end
+
+function Store:build(data,script,env,bucket,id)
 	if script then
 		local fn,err = loadstring(script, '@store/bucket:' .. bucket .. '/script:' .. id)
 		if err then
 			return nil,err
 		end
-		setfenv(fn, 
-			{__filename = id
-			,__dirname = bucket
-			,store = self
-			,logger = logger})
-		data.script = fn
+		setfenv(fn,env)
+		return fn
 	end
-	return data
 end
 
 function Store:add_self_to_cluster(member,cb)
@@ -289,7 +324,7 @@ function Store:sync(cb)
 		}
 		res:on('data', function (chunk)
 			local event = JSON.parse(chunk)
-			logger:info("got store event",event)
+			logger:debug("got store event",event)
 			if event.kind == "delete" then
 				self:_delete(storage,event.bucket,event.id,event.object.last_updated,true,broadcast)
 			elseif event.kind == "store" then
@@ -298,7 +333,7 @@ function Store:sync(cb)
 				broadcast = true
 				-- we store off our self so that we can be added back in.
 				local member = self:fetch("servers",self.id)
-				self:_store(storage,"servers",self.id,member,0,true,false)
+				-- self:_store(storage,"servers",self.id,member,0,true,false)
 				
 				self.storage = storage
 				-- this could take a long time to finish

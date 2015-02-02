@@ -6,17 +6,14 @@
 -- @doc
 --
 -- @end
--- Created :   30 Jan 2015 by Daniel Barney <daniel@pagodabox.com>
+-- Created :   2 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
-return function(data,id,is_alive)
-	logger:debug("alive?",is_alive)
-	for idx,is_alive in pairs(is_alive) do
-		logger:debug("checking",idx,is_alive)
-		if is_alive then
-			return {idx},{}
-		end
-	end
 
-	-- it should never get here. how could no servers ever be alive?
-	return {},{}
+return function(data,cb)
+	local member,err = store:fetch_idx("servers",data[1])
+	if (store.ip == member.ip) and (store.port == member.port) then
+		store:slave_of(member.ip,member.port,cb)
+	else
+		store:promote_to_master(cb)
+	end
 end
