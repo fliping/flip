@@ -49,10 +49,6 @@ else
 			end
 		end
 
-		-- pad the key
-
-		config.key = config.key:sub(0,32) .. string.rep("0",32 - math.min(32,config.key:len()))
-
 		ensure(config.id,'id')
 		ensure(config.gossip,'gossip')
 		ensure(config.gossip.ip,'gossip.ip')

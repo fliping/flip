@@ -38,7 +38,7 @@ function Flip:initialize(config)
 	-- this needs to be reworked.
 	----
 	-- create a unique id for this store. bascially a UUID
-	self.store = Store:new(config.id,{node = config.id,time = hrtime(),random = math.random(100000)},config.api.api,config.api.port,self.api)
+	self.store = Store:new(config.db,config.id,{node = config.id,time = hrtime(),random = math.random(100000)},config.api.api,config.api.port,self.api)
 end
 
 function Flip:start()
@@ -54,10 +54,11 @@ function Flip:start()
 	self.store:open(function(err)
 		if not err then
 
-			-- if I'm not a member of the server, lets set that up.
-			logger:info("storing myself",self.id)
+			-- if I'm not a member of the cluster, lets set that up.
+			
 			local members,err = self.store:fetch("servers",self.id)
 			if err == "not found" then
+				logger:info("bootstrapping node into single cluster")
 				me = 
 					{ip = self.config.gossip.ip
 					,port = self.config.gossip.port
@@ -70,6 +71,21 @@ function Flip:start()
 			elseif err then
 				logger:error("unable to access store: ",err)
 				process.exit(1)
+			end
+
+			-- double check that the default config has been added in
+			local config,err = self.store:fetch("config",self.id)
+			if err == "not found" then
+				key = "secret"
+				config = 
+					{["gossip_interval"] = 1000
+					,["ping_per_interval"] = 1
+					,["ping_timeout"] = 1500
+					,["key"] = key:sub(0,32) .. string.rep("0",32 - math.min(32,key:len()))}
+				self.store:store("config",self.config.id,config)
+				self.config = config
+			elseif err then
+				logger:error("unable check config")
 			end
 
 			-- now that we have been added in, lets start up the system
@@ -123,6 +139,10 @@ function Flip:process_server_update(kind,id,data)
 			member:destroy()
 		end
 		self.system:regen(data.systems)
+	end
+	if self.timer then
+		timer.clearTimer(self.timer)
+		self:ping_members()
 	end
 end
 
@@ -186,7 +206,7 @@ end
 function Flip:ping_members(members)
 	if not members then
 		logger:debug('no more members')
-		timer.setTimeout(self.config.gossip_interval,self.gossip_time,self)
+		self.timer = timer.setTimeout(self.config.gossip_interval,self.gossip_time,self)
 		return
 	end
 	local member = table.remove(members,1)
@@ -211,9 +231,9 @@ function Flip:ping_members(members)
 	-- if we still have some members left over, we need to ping them
 	-- on the next timeout. Otherwise we start gossiping all over again
 	if not (#members == 0) then
-		timer.setTimeout(self.config.gossip_interval,self.ping_members,self,members)
+		self.timer = timer.setTimeout(self.config.gossip_interval,self.ping_members,self,members)
 	else
-		timer.setTimeout(self.config.gossip_interval,self.gossip_time,self)
+		self.timer = timer.setTimeout(self.config.gossip_interval,self.gossip_time,self)
 	end
 
 end
@@ -265,6 +285,7 @@ function Flip:track(id,member,new_state)
 	end
 	
 	-- we need to regenerate all the systems that are on this member
+	-- but async, so that the server state is correct
 	if (new_state == 'alive') or (new_state == 'down') then
 		timer.setTimeout(0,function() self.system:regen(server.systems) end)
 	end

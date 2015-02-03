@@ -20,7 +20,7 @@ local hrtime = require('uv').Process.hrtime
 
 local Store = Emitter:extend()
 
-function Store:initialize(id,version,ip,port,api)
+function Store:initialize(path,id,version,ip,port,api)
 	self.api = api
 	self.id = id
 	self.version = version
@@ -32,41 +32,70 @@ function Store:initialize(id,version,ip,port,api)
 	self.port = port
 	self.is_master = true
 	self.master = {}
+	self.db_path = path
 end
 
-function Store:load_from_disk()
-	return false
+function Store:load_from_disk(cb)
+	local ret = nil
+	local load = coroutine.create(function()
+		local files,err = fs.readdir(self.db_path,function(err)
+			if err then
+				ret = false
+				fs.mkdirSync(self.db_path,"0700")
+			else
+
+				ret = true
+			end
+		end)
+	end)
+	coroutine.resume(load)
+	return ret
+	
 end
 
 function Store:open(cb)
-	if self:load_from_disk() then
-		logger:info("store loaded from disk")
-	else
-		logger:info("bootstrapping store")
+	self:start_async_io(function()
+		if not self:load_from_disk(cb) then
+			logger:info("bootstrapping store")
 
-		local alive = 
-			{["$script"] = fs.readFileSync('./lib/store/alive.lua')}
+			local alive = 
+				{["$script"] = fs.readFileSync('./lib/store/alive.lua')}
 
-		local default = {
-			["$init"] = fs.readFileSync('./lib/store/init.lua'),
-			alive = "update_master",
-			["type"] = "choose_one"}
-		self:_store(self.storage,"store","update_master",alive,0,false,true)
-		self:_store(self.storage,"systems","store",default,0,false,true)
+			local default = {
+				["$init"] = fs.readFileSync('./lib/store/init.lua'),
+				alive = "update_master",
+				["type"] = "choose_master"}
+			self:_store(self.storage,"store","update_master",alive,0,false,true)
+			self:_store(self.storage,"systems","store",default,0,false,true)
 
-		local replicated = 
-			{["$script"] = fs.readFileSync('./lib/plan/topologies/replicated.lua')}
-		local round_robin = 
-			{["$script"] = fs.readFileSync('./lib/plan/topologies/round_robin.lua')}
-		local choose_one = 
-			{["$script"] = fs.readFileSync('./lib/plan/topologies/choose_one.lua')}
+			local replicated = 
+				{["$script"] = fs.readFileSync('./lib/plan/topologies/replicated.lua')}
+			local round_robin = 
+				{["$script"] = fs.readFileSync('./lib/plan/topologies/round_robin.lua')}
+			local choose_master = 
+				{["$script"] = fs.readFileSync('./lib/plan/topologies/choose_master.lua')}
 
-		assert(self:_store(self.storage,"topologies","replicated",replicated,0,false,true))
-		assert(self:_store(self.storage,"topologies","round_robin",round_robin,0,false,true))
-		assert(self:_store(self.storage,"topologies","choose_one",choose_one,0,false,true))
-		logger:info('loaded store from disk')
-		cb()
-	end
+			assert(self:_store(self.storage,"topologies","replicated",replicated,0,false,true))
+			assert(self:_store(self.storage,"topologies","round_robin",round_robin,0,false,true))
+			assert(self:_store(self.storage,"topologies","choose_master",choose_master,0,false,true))
+			logger:info('loaded bootstrapped store')
+			cb()
+		end
+	end)
+end
+
+function Store:start_async_io(cb)
+	self:on('all',function(b_id,action,id,data)
+		local path = self.db_path .. "/" .. b_id .. ":" .. id .. ".json"
+		if action == "store" then
+			local json = self:prepare_json(data)
+			json = JSON.stringify(json)
+			fs.writeFile(path,json,function() end)
+		elseif action == "delete" then
+			fs.unlink(path,function() end)
+		end
+	end)
+	cb()
 end
 
 function Store:slave_of(ip,port,cb)
@@ -156,7 +185,6 @@ function Store:_store(store,b_id,id,data,last_known,sync,broadcast)
 	end
 	local object = bucket[id]
 	if sync == false then
-		logger:info("sync",sync,sync == false)
 		if not(object == nil) then
 			
 			if not (object.last_updated == last_known) then
@@ -179,9 +207,7 @@ function Store:_store(store,b_id,id,data,last_known,sync,broadcast)
 		self:install(data,b_id,id)
 		bucket[id] = data
 		bucket_idx[data.idx] = data
-		logger:info(bucket_idx,sync)
 		if broadcast then
-			logger:info("broadcasting",data)
 			self:emit(b_id,"store",id,data)
 			self:emit("all",b_id,"store",id,data)
 		end
@@ -235,8 +261,9 @@ function Store:compile(data,bucket,id)
 	local fn,err = self:build(data,script,env,bucket,id)
 	if err then
 		return err
+	elseif fn then
+		data.script = fn()
 	end
-	data.script = fn
 end
 
 function Store:install(data,bucket,id)
@@ -273,7 +300,6 @@ function Store:build(data,script,env,bucket,id)
 end
 
 function Store:add_self_to_cluster(member,cb)
-	logger:info("got",member,self.id)
 	local copy = self:prepare_json(member)
 	copy.systems = nil
 	local body = JSON.stringify(copy)
@@ -303,8 +329,6 @@ function Store:add_self_to_cluster(member,cb)
 	end)
 	req:on('error',cb)
 	req:on('end',function() end)
-	
-	logger:info('syncing upto cluster',body)
 	req:done(body)
 end
 

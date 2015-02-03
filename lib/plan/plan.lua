@@ -106,7 +106,7 @@ function Plan:next_plan()
 				return 
 			end
 			-- we ask the topology what data points are needed
-			local add,remove = topology.script()(self.system.data,idx,alive)
+			local add,remove = topology.script(self.system.data,idx,alive)
 			logger:debug("toplogy returned",self.system.type,add,remove)
 			local new_plan = {add = add,remove = remove}
 
@@ -315,7 +315,7 @@ function Plan:_run(state,data,cb)
 				cb()
 			else
 				logger:info("running ",self.sys_name,cmd)
-				script.script()(data,cb)
+				script.script(data,cb)
 			end
 		end
 		else

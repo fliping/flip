@@ -49,7 +49,6 @@ function System:disable(cb)
 end
 
 function System:check_system(kind,id,system_config) 
-	logger:info(kind,id,system_config)
 	if kind == "store" then
 		local plan = self.plans[id]
 		if plan then
@@ -71,7 +70,7 @@ function System:check_system(kind,id,system_config)
 end
 
 function System:regen(systems)
-	logger:info("Sytem is regeneration these systems",systems)
+	logger:info("Sytem is regenerating these systems",systems)
 	if systems then
 		for _idx,system in pairs(systems) do
 			local plan = self.plans[system]
