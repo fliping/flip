@@ -63,7 +63,7 @@ function Member:probe(who)
 		for _,_ in pairs(self.probed) do
 			count = count + 1
 		end
-		logger:debug('checking quorum',count,self.config.quorum)
+		logger:info('checking quorum',count,self.config.quorum)
 		if count >= self.config.quorum then
 			self:clear_alive_check()
 			self:update_state('down')

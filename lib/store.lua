@@ -13,7 +13,7 @@ local Emitter = require('core').Emitter
 local logger = require('./logger')
 local JSON = require('json')
 local http = require('http')
-local Timer = require('timer')
+local timer = require('timer')
 local fs = require('fs')
 local table = require('table')
 local hrtime = require('uv').Process.hrtime
@@ -31,32 +31,40 @@ function Store:initialize(path,id,version,ip,port,api)
 	self.ip = ip
 	self.port = port
 	self.is_master = true
+	self.connection = nil
 	self.master = {}
 	self.db_path = path
 end
 
 function Store:load_from_disk(cb)
-	local ret = nil
-	local load = coroutine.create(function()
-		local files,err = fs.readdir(self.db_path,function(err)
-			if err then
-				ret = false
-				fs.mkdirSync(self.db_path,"0700")
-			else
-
-				ret = true
+	local files,err = fs.readdir(self.db_path,function(err,files)
+		if err then
+			logger:info(err,files)
+			fs.mkdir(self.db_path,"0700",function()
+				cb(err)
+			end)
+		else
+			logger:info("loading",files)
+			for _idx,file in pairs(files) do
+				local json,err = fs.readFileSync(self.db_path .. "/" .. file)
+				if err then
+					logger:error("it errored",err)
+					process.exit(1)
+				else
+					local object = JSON.parse(json)
+					self:_store(self.storage,object.bucket,object.id,object,nil,false,true)
+				end
 			end
-		end)
+			cb()
+		end
 	end)
-	coroutine.resume(load)
-	return ret
-	
 end
 
 function Store:open(cb)
-	self:start_async_io(function()
-		if not self:load_from_disk(cb) then
+	self:load_from_disk(function(err)
+		if err then
 			logger:info("bootstrapping store")
+			self:start_async_io()
 
 			local alive = 
 				{["$script"] = fs.readFileSync('./lib/store/alive.lua')}
@@ -79,13 +87,16 @@ function Store:open(cb)
 			assert(self:_store(self.storage,"topologies","round_robin",round_robin,0,false,true))
 			assert(self:_store(self.storage,"topologies","choose_master",choose_master,0,false,true))
 			logger:info('loaded bootstrapped store')
-			cb()
+		else
+			logger:info('store was loaded from disk')
+			self:start_async_io()
 		end
+		cb()
 	end)
 end
 
-function Store:start_async_io(cb)
-	self:on('all',function(b_id,action,id,data)
+function Store:start_async_io()
+	self:on("sync",function(b_id,action,id,data)
 		local path = self.db_path .. "/" .. b_id .. ":" .. id .. ".json"
 		if action == "store" then
 			local json = self:prepare_json(data)
@@ -95,30 +106,33 @@ function Store:start_async_io(cb)
 			fs.unlink(path,function() end)
 		end
 	end)
-	cb()
 end
 
 function Store:slave_of(ip,port,cb)
-	if self.is_master then
-		logger:info("slave of",ip,port)
-		self.is_master = false
-		self.master.ip = ip
-		self.master.port = port
-		-- i need to connect up to the new master
-		-- ask it for who it thinks is the master
-		-- maybe connect there
-		-- and issue a sync to pull down the data.
-		-- and then add myself into the cluster
-		self:sync(cb)
-	elseif cb then
-		cb("already a member of a cluster, or joining is in progress")
+	logger:info("slave of",ip,port)
+	if self.connection then
+		timer.clearTimer(self.connection)
 	end
+	self.is_master = false
+	self.master.ip = ip
+	self.master.port = port
+	
+	-- we need to start syncing up with the slave
+	self:sync(cb)
 end
 
 function Store:promote_to_master(cb)
 	logger:info("i am new new master for the store")
 	self.is_master = true
+	if self.connection then
+		-- this may need to wait for all data from the old master
+		timer.clearTimer(self.connection)
+	end
 	cb()
+end
+
+function Store:upto_date()
+	return self.is_master or not self.connection
 end
 
 function Store:fetch(b_id,id)
@@ -128,12 +142,20 @@ function Store:fetch(b_id,id)
 			local object = bucket[id]
 
 			if not(object == nil) then
-				return object
+				if self:upto_date() then
+					return object
+				else
+					return object,"old data"
+				end
 			else
 				return nil,"not found"
 			end
 		else
-			return bucket
+			if self:upto_date() then
+				return bucket
+			else
+				return bucket,"old data"
+			end
 		end
 	else
 		return nil,"not found"
@@ -146,12 +168,20 @@ function Store:fetch_idx(b_id,idx)
 		if idx then
 			local object = bucket[idx]
 			if not(object == nil) then
-				return object
+				if self:upto_date() then
+					return object
+				else
+					return object,"old data"
+				end
 			else
 				return nil,"not found"
 			end
 		else
-			return bucket
+			if self:upto_date() then
+				return bucket
+			else
+				return bucket,"old data"
+			end
 		end
 	else
 		return nil,"not found"
@@ -175,6 +205,7 @@ function Store:delete(b_id,id,last_known)
 end
 
 function Store:_store(store,b_id,id,data,last_known,sync,broadcast)
+	data.bucket = b_id
 	local bucket = store.storage[b_id]
 	local bucket_idx = store.storage_idx[b_id]
 	if bucket == nil then
@@ -207,9 +238,10 @@ function Store:_store(store,b_id,id,data,last_known,sync,broadcast)
 		self:install(data,b_id,id)
 		bucket[id] = data
 		bucket_idx[data.idx] = data
+
 		if broadcast then
 			self:emit(b_id,"store",id,data)
-			self:emit("all",b_id,"store",id,data)
+			self:emit("sync",b_id,"store",id,data)
 		end
 		return data
 	end
@@ -244,7 +276,7 @@ function Store:_delete(store,b_id,id,last_known,sync,broadcast)
 			end
 			if broadcast then
 				self:emit(b_id,"delete",id)
-				self:emit("all",b_id,"delete",id,object)
+				self:emit("sync",b_id,"delete",id,object)
 			end
 		end
 	end
@@ -340,6 +372,7 @@ function Store:sync(cb)
 		path = "/store/sync/1"
 	}
 
+	self.connection = nil
 	local req = http.request(options, function (res)
 		local broadcast = false
 		local storage = {
@@ -347,8 +380,9 @@ function Store:sync(cb)
 			storage_idx = {}
 		}
 		res:on('data', function (chunk)
+			logger:info(chunk)
 			local event = JSON.parse(chunk)
-			logger:debug("got store event",event)
+			logger:info("got store event",event)
 			if event.kind == "delete" then
 				self:_delete(storage,event.bucket,event.id,event.object.last_updated,true,broadcast)
 			elseif event.kind == "store" then
@@ -368,7 +402,20 @@ function Store:sync(cb)
 					if bucket then
 						for id,object in pairs(bucket) do
 							self:emit(b_id,"store",id,object)
-							self:emit("all",b_id,"store",id,object)
+							self:emit("sync",b_id,"store",id,object)
+						end
+					end
+				end
+				for b_id,bucket in pairs(storage.storage) do
+					if (b_id == "stores") or (b_id == "systems") or (b_id == "servers") then
+						logger:debug("skipping",b_id)
+					else
+						if bucket then
+							for id,object in pairs(bucket) do
+								local copy = self:prepare_json(object)
+								self:emit(b_id,"store",id,copy)
+								self:emit("sync",b_id,"store",id,copy)
+							end
 						end
 					end
 				end
@@ -379,6 +426,13 @@ function Store:sync(cb)
 			end
 			end)
 		end)
+	req:on('error',function(err) 
+		logger:warning("unable to sync with store",err)
+		self.connection = timer.setTimeout(5000,self.sync,self,cb)
+	end)
+	req:on('end',function() 
+		self.connection = timer.setTimeout(5000,self.sync,self,cb)
+	end)
 	req:done()
 end
 
@@ -387,11 +441,11 @@ function Store:to_json(version)
 	local bounce = function(b_id,kind,id,object)
 		streamer:emit('event',{bucket = b_id,kind = kind,id = id,object = object})
 	end
-	self:on('all',bounce)
+	self:on("sync",bounce)
 	streamer.close = function()
-		self.removeListener('all',bounce)
+		self.removeListener("sync",bounce)
 	end
-	Timer.setTimeout(0,function()
+	timer.setTimeout(0,function()
 		-- this can probably block the entire server for quite some time.
 		-- maybe cause the master to be flagged as down?
 		-- TODO this should be split up across multiple async callbacks.

@@ -9,9 +9,7 @@
 -- Created :   30 Jan 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 return function(data,id,is_alive)
-	logger:debug("alive?",is_alive)
 	for idx,is_alive in pairs(is_alive) do
-		logger:debug("checking",idx,is_alive)
 		if is_alive then
 			return {idx},{}
 		end

@@ -105,9 +105,9 @@ function Packet:parse(packet)
 		end
 		for i=0,max do
 			nodes[#nodes + 1] = not (bit.band(byte,bit.lshift(1,i)) == 0)
+			
 		end
 	end
-
 	return packet:sub(1,32),integerify(packet:sub(33,36)),integerify(packet:sub(37,40)),nodes
 end
 

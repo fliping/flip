@@ -11,9 +11,9 @@
 
 return function(data,cb)
 	local member,err = store:fetch_idx("servers",data[1])
-	if (store.ip == member.ip) and (store.port == member.port) then
-		store:slave_of(member.ip,member.port,cb)
-	else
+	if (store.id == member.id) then
 		store:promote_to_master(cb)
+	else
+		store:slave_of(member.http_ip,member.http_port,cb)
 	end
 end

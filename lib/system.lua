@@ -70,8 +70,8 @@ function System:check_system(kind,id,system_config)
 end
 
 function System:regen(systems)
-	logger:info("Sytem is regenerating these systems",systems)
 	if systems then
+		logger:info("begining regeneration of",systems)
 		for _idx,system in pairs(systems) do
 			local plan = self.plans[system]
 			if plan then

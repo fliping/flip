@@ -72,36 +72,42 @@ end
 
 function Plan:fetch_members()
 	local servers,err = self.store:fetch_idx("servers")
-	if err then
+	if err and not (err == "old data") then
 		return nil,nil,err
 	end
 	local members = {}
 	for _idx,server in pairs(servers) do
+		members[#members + 1] = false
 		local systems = server.systems
 		if systems then
 			for _idx,sys_name in pairs(systems) do
 				if sys_name == self.sys_name then
 					local member = self.flip:find_member(server.id)
 					if member then
-						members[#members + 1] = not(member.state == 'down')
+						members[#members] = not(member.state == 'down')
 						break
 					end
 				end
 			end
 		end
 	end
-	logger:debug("found members of system",members)
-	return members,1
+	local object,err = self.flip.store:fetch("servers",self.flip.config.id)
+	logger:debug("found members of system",members,object,err)
+	if err and not (err == "old data") then
+		return nil,nil,err
+	else
+		return members,object.idx
+	end
 end
 
 function Plan:next_plan()
 	if self.enabled then
 		local topology,err = self.store:fetch('topologies',self.system.type)
-		if err then
+		if err and not (err == "old data") then
 			logger:warning("topology was not found",self.system.type)
 		else
 			local alive,idx,err = self:fetch_members()
-			if err then
+			if err and not (err == "old data") then
 				logger:warning("unable to start plan",err)
 				return 
 			end
@@ -119,6 +125,7 @@ function Plan:next_plan()
 			end
 
 			if self.queue then
+				logger:debug("queueing change")
 				-- we are currently running scripts, lets wait for them to be done
 				self.queue = new_plan
 			else
@@ -207,6 +214,7 @@ function Plan:compute(new_plan)
 
 	-- if there were changes
 	if (#add > 0) or (#remove > 0) then
+		logger:info("changes in the plan",self.plan)
 		self.queue = {add = add,remove = remove}
 		self:run()
 	else
@@ -259,7 +267,7 @@ function Plan:run()
 			if self.queue == true then
 				-- if not, lets end
 				self.queue = nil
-				logger:info("current plan",self.sys_name,self.plan)
+				logger:info("finalized plan for '" .. self.sys_name .. "' is",self.plan)
 			elseif not(self.queue == nil) then
 				-- if there is another thing queued up to run,
 				-- lets run it
@@ -310,7 +318,7 @@ function Plan:_run(state,data,cb)
 			end
 		else
 			local script,err = self.store:fetch(self.sys_name,cmd)
-			if err then
+			if err and not (err == "old data") then
 				logger:warning("unable to find script in store",self.sys_name,cmd)
 				cb()
 			else

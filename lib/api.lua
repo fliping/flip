@@ -81,6 +81,8 @@ end
 function Api:error_code(err)
 	if (err == "not found") then
 		return 404
+	elseif (err == "old data") then
+		return 203
 	elseif (err == "try again") then
 		return 400
 	else
