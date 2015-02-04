@@ -6,14 +6,8 @@
 -- @doc
 --
 -- @end
--- Created :   2 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
+-- Created :   4 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
-return function(data,cb)
-	local member,err = store:fetch_idx("servers",data[1])
-	if (store.id == member.id) then
-		store:promote_to_master(cb)
-	else
-		store:slave_of(member.http_ip,member.http_port,cb)
-	end
-end
+return function (data,id,is_alive)
+	return {},{}

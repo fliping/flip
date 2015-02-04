@@ -29,6 +29,7 @@ function System:disable(cb)
 		count = 0
 		for _idx,plan in pairs(self.plans) do
 			count = count + 1
+			self:stop_system(plan.system)
 			plan:disable(function()
 				count = count - 1
 				if count == 0 then
@@ -55,12 +56,14 @@ function System:check_system(kind,id,system_config)
 			plan:update(system_config)
 			logger:info("updated plan:",id)
 		else
+			self:init_system(system_config)
 			self.plans[id] = Plan:new(system_config,id,self.flip,self.store)
 			logger:info("created plan:",id)
 		end
 	elseif kind == "delete" then
 		local plan = self.plans[id]
 		if plan then
+			self:stop_system(system_config)
 			self.plans[id] = nil
 			plan:disable(function() 
 				logger:info("removed plan:",id)
@@ -93,6 +96,8 @@ function System:enable()
 
 		
 		for sys_id,system_config in pairs(systems) do
+			self:init_system(system_config)
+
 			local plan = Plan:new(system_config,sys_id,self.flip,self.store)
 			self.plans[sys_id] = plan
 
@@ -120,6 +125,47 @@ function System:enable()
 	else
 		logger:warning('requested to enable system, but already enabled')
 	end
+end
+
+function System:init_system(system)
+	if system.init then
+		local script,err = self.store:fetch(system.id,system.init)
+		if script and script.script then
+			logger:info("running",script)
+			-- init scrips are primarily for starting up api endpoints
+			script.script(self.flip.api.lever)
+		end
+		local build = function(key)
+			return function(req,res)
+				local script,err = self.store:fetch(system.id,key)
+				if err then
+					local code = self.store:error_code(err)
+					res:writeHead(code,{})
+					res:finish(JSON.stringify({error = err}))
+				elseif script and script.script then
+					script.script(req,res)
+				else
+					res:writeHead(404,{})
+					res:finish(JSON.stringify({error = "not code"}))
+				end
+			end
+		end
+		-- and we need to add in routes that are needed
+		if system.endpoints then
+			for method,routes in pairs(system.endpoints) do
+				for route,key in pairs(routes) do
+					-- this isn't safe to do but is ok for now.
+					logger:info("adding route",method,route,key)
+					self.flip.api.lever[method](self.flip.api.lever,route,build(key))
+				end
+			end
+		end
+	end
+end
+
+function System:stop_system(system)
+	-- this should run the shutdown script, and remove all routes
+	logger:info("stopping system")
 end
 
 return System
