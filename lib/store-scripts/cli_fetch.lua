@@ -11,7 +11,13 @@
 
 -- this will eventually be run by the cli when trying to find
 -- something in the store
-
 return function(bucket,id)
 	logger:info("I am trying to fetch something from the cluster",bucket,id)
+	local object,err = store:fetch(bucket,id)
+	if err then
+		logger:error("unable to find object",err)
+		process.exit(1)
+	else
+		logger:info(object,err)
+	end
 end

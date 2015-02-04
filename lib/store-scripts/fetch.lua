@@ -19,7 +19,6 @@ return function(req,res)
 	else
 		res:writeHead(200,{})
 		local prepared = store:prepare_json(object)
-		logger:info("sending",prepared)
 		res:finish(JSON.stringify(prepared))
 	end
 end

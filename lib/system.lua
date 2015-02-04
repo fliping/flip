@@ -14,6 +14,7 @@ local Plan = require('./plan/plan')
 
 local Emitter = require('core').Emitter
 local logger = require('./logger')
+local JSON = require('json')
 
 local System = Emitter:extend()
 function System:initialize(store,flip)
@@ -139,7 +140,7 @@ function System:init_system(system)
 			return function(req,res)
 				local script,err = self.store:fetch(system.id,key)
 				if err then
-					local code = self.store:error_code(err)
+					local code = self.store.api:error_code(err)
 					res:writeHead(code,{})
 					res:finish(JSON.stringify({error = err}))
 				elseif script and script.script then

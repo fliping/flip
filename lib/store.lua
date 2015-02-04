@@ -194,6 +194,9 @@ function Store:compile(data,bucket,id)
 			{__filename = id
 			,__dirname = bucket
 			,pairs = pairs
+			,pcall = pcall
+			,xpcall = xpcall
+			,table = table
 			,store = self
 			,logger = logger
 			,JSON = JSON

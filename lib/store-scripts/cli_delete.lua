@@ -14,4 +14,6 @@
 
 return function(bucket,id)
 	logger:info("I am trying to delete something from the cluster",bucket,id)
+	local object,err = store:delete(bucket,id)
+	logger:info("got results",object,err)
 end

@@ -14,4 +14,6 @@
 
 return function(bucket,id,...)
 	logger:info("I am trying to add something to the cluster",bucket,id,...)
+	local object,err = store:store(bucket,id,{})
+	logger:info("got results",object,err)
 end

@@ -19,17 +19,23 @@ return function(req,res)
 	
 	req:on('end',function()
 
-		local data = JSON.parse(table.concat(chunks))
-		local last_known = req.headers["last-known-update"] or data.last_updated
-		
-		local object,err = store:store(req.env.bucket,req.env.id,data,last_known)
-		if err then
-			local code = error_code(err)
-			res:writeHead(code,{})
-			res:finish(JSON.stringify({error = err,updated = store:prepare_json(object)}))
-		else
-			res:writeHead(201,{})
-			res:finish(JSON.stringify(store:prepare_json(object)))
+		local success,data = xpcall(function() return JSON.parse(table.concat(chunks)) end,function(err)
+			res:writeHead(400,{})
+			res:finish('{"error":"bad json"}')
+		end)
+
+		if success then
+			local last_known = req.headers["last-known-update"] or data.last_updated
+			
+			local object,err = store:store(req.env.bucket,req.env.id,data,last_known)
+			if err then
+				local code = error_code(err)
+				res:writeHead(code,{})
+				res:finish(JSON.stringify({error = err,updated = store:prepare_json(object)}))
+			else
+				res:writeHead(201,{})
+				res:finish(JSON.stringify(store:prepare_json(object)))
+			end
 		end
 	end)
 end

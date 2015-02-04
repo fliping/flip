@@ -14,11 +14,6 @@ local os = require('os')
 local JSON = require('json')
 local http = require('http')
 
-local store = 
-	{fetch = function(bucket,id) return request('get',bucket,id,nil) end
-	,delete = function(bucket,id) return request('delete',bucket,id,nil) end
-	,store = function(bucket,id,data) return request('post',bucket,id,data) end}
-
 function main()
 	if process.argv[1] == '-server' then
 		table.remove(process.argv,1)
@@ -29,9 +24,8 @@ function main()
 		logger:info("entering cli mode")
 		local system = table.remove(process.argv,1)
 		local command = table.remove(process.argv,1)
-		logger:info("making request",system,command)
-		request('get','systems',system,nil,function(result,err)
-			logger:info(result,err)
+		logger:debug("making request",system,command)
+		request('get','store','systems',system,nil,function(result,err)
 			if err == "not found" then
 				logger:error("command was not found",system,command)
 				process.exit(1)
@@ -39,8 +33,8 @@ function main()
 				logger:error(err)
 				process.exit(1)
 			elseif result.cli and result.cli[command] then
-				logger:info("running script",result.cli[command])
-				request('get',system,result.cli[command],nil,function(result,err)
+				logger:debug("running script",result.cli[command])
+				request('get','store',system,result.cli[command],nil,function(result,err)
 					if err then
 						logger:error("command was not found",system,command)
 						process.exit(1)
@@ -50,17 +44,29 @@ function main()
 						if err then
 							logger:error("script failed to compile",err)
 						else
+							local batton = {}
+
 							-- set the env
 							setfenv(fn,
 								{__filename = id
 								,__dirname = bucket
+								,process = process
 								,pairs = pairs
 								,logger = logger
-								,require = local_require
-								,store = store})
+								,require = local_require(batton)
+								,store = bind_store(batton)})
 
-							-- and now we run the script!
-							fn()(unpack(process.argv))
+							local co = coroutine.create(function()
+								-- and now we run the script!
+								local err = function(err) logger:error(err) end
+								local success,fn = xpcall(fn,err)
+								if success then
+									local success,fn = xpcall(function() fn(unpack(process.argv)) end,err)
+								end
+							end)
+							coroutine.resume(co)
+							check_baton(batton,co)
+							
 						end
 					else
 						logger:error("command was not found",system,command)
@@ -76,12 +82,47 @@ function main()
 	end
 end
 
-function request(method,bucket,id,data,cb)
+function check_baton(batton,co)
+	if batton.call then
+		batton.call(function(...)
+			batton.call = nil
+			batton.respose = {...}
+			if coroutine.resume(co) then
+				batton.respose = nil
+				check_baton(batton,co)
+			end
+		end)
+	end
+end
+
+function bind_store(batton)
+	return
+		{fetch = function(_,bucket,id) 
+			batton.call = function(cb) request('get','store',bucket,id,nil,cb) end
+			coroutine.yield()
+			return unpack(batton.respose)
+		end
+		,delete = function(_,bucket,id) 
+			batton.call = function(cb) request('delete','store',bucket,id,nil,cb) end
+			coroutine.yield()
+			return unpack(batton.respose)
+		end
+		,store = function(_,bucket,id,data) 
+			logger:debug("making request",bucket,id,data)
+			batton.call = function(cb) request('post','store',bucket,id,data,cb) end
+			coroutine.yield()
+			return unpack(batton.respose)
+		end}
+end
+
+
+function request(method,prefix,bucket,id,data,cb)
+	logger:debug("request",method,prefix,bucket,id,data,cb)
 	local path
 	if id then
-		path = "/store/" .. bucket .. "/" .. id
+		path = "/" .. prefix .. "/" .. bucket .. "/" .. id
 	else
-		path = "/store/" .. bucket
+		path = "/" .. prefix .. "/" .. bucket
 	end
 	local options =
 			{host = "127.0.0.1" -- these need to be pulled from the config file...
@@ -104,6 +145,7 @@ function request(method,bucket,id,data,cb)
 				local result = JSON.parse(table.concat(chunks))
 				cb(result)
 			elseif res.status_code == 404 then
+				logger:error("bad response",table.concat(chunks))
 				cb(nil,"not found")
 			else
 				cb(nil,res.status_code ..": "..table.concat(chunks))
@@ -114,13 +156,18 @@ function request(method,bucket,id,data,cb)
 	req:done(data)
 end
 
-function local_require(object)
-	local sucess,ret = pcall(require,object)
-	if sucess then
-		logger:info("required a local thing")
-		return unpack(ret)
-	else
-		logger:warning('I need to require a remote script')
+function local_require(batton)
+	return function(object)
+		local sucess,ret = pcall(require,object)
+		if sucess then
+			logger:debug("required a local thing")
+			return unpack(ret)
+		else
+			logger:warning('I need to require a remote script')
+			batton.call = function(cb) cb() end
+			coroutine.yield()
+			return unpack(batton.respose)
+		end
 	end
 end
 
