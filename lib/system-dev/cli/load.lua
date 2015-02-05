@@ -9,8 +9,8 @@
 -- Created :   4 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
--- this will eventually be run by the cli when trying to add
--- something to the store
+-- this script will take a folder of scripts and load them into flip
+-- as a new system, or update an existing system.
 
 local fs = require('fs')
 local string = require('string')
@@ -104,6 +104,11 @@ return function(directory,system_name)
 	logger:info("starting to read from",directory,system_name)
 	local system,scripts = load_dir(directory,{},true)
 	logger:info("was able to build system")
+
+	local success,description = pcall(function() return fs.readFileSync(directory .. "/description.txt") end)
+	local success,help = pcall(function() return fs.readFileSync(directory .. "/help.txt") end)
+	system.description = description
+	system.help = help
 	
 
 	local object,err = store:fetch("systems",system_name)

@@ -1,0 +1,3 @@
+           fetch  {bucket} {id} - retreive an object from the flip  kv-store
+           store  {bucket} {id} [(-json|-file)] {data} - load data into the flip kv-stote
+           delete {bucket} {id} {last_known} - delete an object from the flip kv-store

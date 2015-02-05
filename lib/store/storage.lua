@@ -84,6 +84,8 @@ return function(Store)
 					,stop = "stop"
 					,alive = "update_master"
 					,["type"] = "choose_master"
+					,help = fs.readFileSync('./lib/system-store/help.txt')
+					,description = fs.readFileSync('./lib/system-store/description.txt')
 					,endpoints =
 						{get = 
 							{["/store/sync/?version"] = "get-sync"

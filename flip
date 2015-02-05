@@ -21,9 +21,13 @@ function main()
 		require('./flip_server')
 	else
 		logger:add_logger('info','console',function(...) p(os.date("%x %X"),...) end)
-		logger:info("entering cli mode")
+		logger:debug("entering cli mode")
 		local system = table.remove(process.argv,1)
 		local command = table.remove(process.argv,1)
+		if system == 'help' then
+			command = 'help'
+			system = nil
+		end
 		logger:debug("making request",system,command)
 		request('get','store','systems',system,nil,{},function(result,err)
 			if err == "not found" then
@@ -32,6 +36,19 @@ function main()
 			elseif err then
 				logger:error(err)
 				process.exit(1)
+			elseif (system == nil) and (command == "help") then
+				for _idx,system in pairs(result) do
+					if system.description then
+						process.stdout:write(system.description)
+					end
+				end
+			elseif command == "help" then
+				if result.description then
+					process.stdout:write(result.description)
+				end
+				if result.help then
+					process.stdout:write(result.help)
+				end
 			elseif result and result.cli and result.cli[command] then
 				logger:debug("running script",result.cli[command])
 				request('get','store',system,result.cli[command],nil,{},function(result,err)
