@@ -9,5 +9,16 @@
 -- Created :   4 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
-return function (data,id,is_alive)
-	return {},{}
+return function(req,res)
+	logger:info("fetch",req.env.bucket,req.env.id)
+	local object,err = store:fetch(req.env.bucket,req.env.id)
+	if err then
+		local code = error_code(err)
+		res:writeHead(code,{})
+		res:finish(JSON.stringify({error = err}))
+	else
+		res:writeHead(200,{})
+		local prepared = store:prepare_json(object)
+		res:finish(JSON.stringify(prepared))
+	end
+end

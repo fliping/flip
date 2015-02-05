@@ -9,17 +9,11 @@
 -- Created :   4 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
-return function(req,res)
-	local last_known = 0 + req.headers["last-known-update"]
-	logger:info("delete",req.env.bucket,req.env.id,last_known)
-	
-	local updated,err = store:delete(req.env.bucket,req.env.id,last_known)
-	if err then
-		local code = error_code(err)
-		res:writeHead(code,{})
-		res:finish(JSON.stringify({error = err,updated = store:prepare_json(updated)}))
-	else
-		res:writeHead(204,{})
-		res:finish()
-	end
+-- this will eventually be run by the cli when trying to delete
+-- something from the store
+
+return function(bucket,id,last_known)
+	logger:info("I am trying to delete something from the cluster",bucket,id)
+	local object,err = store:delete(bucket,id,last_known)
+	logger:info("got results",object,err)
 end

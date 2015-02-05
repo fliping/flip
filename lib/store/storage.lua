@@ -24,13 +24,18 @@ return function(Store)
 			else
 				logger:info("loading",files)
 				for _idx,file in pairs(files) do
-					local json,err = fs.readFileSync(self.db_path .. "/" .. file)
-					if err then
-						logger:error("it errored",err)
-						process.exit(1)
+					local path = self.db_path .. "/" .. file
+					if file:sub(-1) == "~" then
+						fs.unlink(path,function() end)
 					else
-						local object = JSON.parse(json)
-						self:_store(self.storage,object.bucket,object.id,object,nil,false,true)
+						local json,err = fs.readFileSync(path)
+						if err then
+							logger:error("it errored",err)
+							process.exit(1)
+						else
+							local object = JSON.parse(json)
+							self:_store(self.storage,object.bucket,object.id,object,nil,false,true)
+						end
 					end
 				end
 				cb()
@@ -44,34 +49,35 @@ return function(Store)
 				logger:info("bootstrapping store")
 				self:start_async_io()
 
-				local alive = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/alive.lua')}
+				
 				local sync = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/sync.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/endpoints/store/sync/?version/get-sync.lua')}
 				local fetch = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/fetch.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/endpoints/store/?bucket/?id/get-fetch.lua')}
 				local post = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/post.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/endpoints/store/?bucket/?id/post-post.lua')}
 				local delete = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/delete.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/endpoints/store/?bucket/?id/delete-delete.lua')}
 				local join_cluster = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/join_cluster.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/endpoints/cluster/join/?ip/?port/post-join_cluster.lua')}
 
 				local cli_join = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/cli_join.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/cli/join.lua')}
 				local cli_leave = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/cli_leave.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/cli/leave.lua')}
 				local cli_store = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/cli_store.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/cli/store.lua')}
 				local cli_fetch = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/cli_fetch.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/cli/fetch.lua')}
 				local cli_delete = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/cli_delete.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/cli/delete.lua')}
 
+				local alive = 
+					{["$script"] = fs.readFileSync('./lib/system-store/alive.lua')}
 				local init = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/init.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/init.lua')}
 				local stop = 
-					{["$script"] = fs.readFileSync('./lib/store-scripts/stop.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-store/stop.lua')}
 
 				local default = 
 					{init = "init"
@@ -80,33 +86,33 @@ return function(Store)
 					,["type"] = "choose_master"
 					,endpoints =
 						{get = 
-							{["/store/sync/?version"] = "sync"
-							,["/store/?bucket"] = "fetch"
-							,["/store/?bucket/?id"] = "fetch"}
+							{["/store/sync/?version"] = "get-sync"
+							,["/store/?bucket"] = "get-fetch"
+							,["/store/?bucket/?id"] = "get-fetch"}
 						,post = 
-							{["/store/?bucket/?id"] = "post"
-							,["/cluster/join/?ip/?port"] = "join_cluster"}
+							{["/store/?bucket/?id"] = "post-post"
+							,["/cluster/join/?ip/?port"] = "post-join_cluster"}
 						,delete = 
-							{["/store/?bucket/?id"] = "delete"}}
+							{["/store/?bucket/?id"] = "delete-delete"}}
 					,cli =
-						{join = "cli_join"
-						,leave = "cli_leave"
-						,store = "cli_store"
-						,fetch = "cli_fetch"
-						,delete = "cli_delete"}}
+						{join = "join"
+						,leave = "leave"
+						,store = "store"
+						,fetch = "fetch"
+						,delete = "delete"}}
 
 				self:_store(self.storage,"store","update_master",alive,0,false,true)
-				self:_store(self.storage,"store","sync",sync,0,false,true)
-				self:_store(self.storage,"store","fetch",fetch,0,false,true)
-				self:_store(self.storage,"store","post",post,0,false,true)
-				self:_store(self.storage,"store","delete",delete,0,false,true)
-				self:_store(self.storage,"store","join_cluster",join_cluster,0,false,true)
+				self:_store(self.storage,"store","get-sync",sync,0,false,true)
+				self:_store(self.storage,"store","get-fetch",fetch,0,false,true)
+				self:_store(self.storage,"store","post-post",post,0,false,true)
+				self:_store(self.storage,"store","delete-delete",delete,0,false,true)
+				self:_store(self.storage,"store","post-join_cluster",join_cluster,0,false,true)
 
-				self:_store(self.storage,"store","cli_join",cli_join,0,false,true)
-				self:_store(self.storage,"store","cli_leave",cli_leave,0,false,true)
-				self:_store(self.storage,"store","cli_store",cli_store,0,false,true)
-				self:_store(self.storage,"store","cli_fetch",cli_fetch,0,false,true)
-				self:_store(self.storage,"store","cli_delete",cli_delete,0,false,true)
+				self:_store(self.storage,"store","join",cli_join,0,false,true)
+				self:_store(self.storage,"store","leave",cli_leave,0,false,true)
+				self:_store(self.storage,"store","store",cli_store,0,false,true)
+				self:_store(self.storage,"store","fetch",cli_fetch,0,false,true)
+				self:_store(self.storage,"store","delete",cli_delete,0,false,true)
 
 				self:_store(self.storage,"store","init",init,0,false,true)
 				self:_store(self.storage,"store","stop",stop,0,false,true)
@@ -114,15 +120,18 @@ return function(Store)
 				self:_store(self.storage,"systems","store",default,0,false,true)
 
 				local replicated = 
-					{["$script"] = fs.readFileSync('./lib/plan/topologies/replicated.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-topology/replicated.lua')}
 				local round_robin = 
-					{["$script"] = fs.readFileSync('./lib/plan/topologies/round_robin.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-topology/round_robin.lua')}
 				local choose_master = 
-					{["$script"] = fs.readFileSync('./lib/plan/topologies/choose_master.lua')}
+					{["$script"] = fs.readFileSync('./lib/system-topology/choose_master.lua')}
+				local nothing = 
+					{["$script"] = fs.readFileSync('./lib/system-topology/nothing.lua')}
 
-				assert(self:_store(self.storage,"topologies","replicated",replicated,0,false,true))
-				assert(self:_store(self.storage,"topologies","round_robin",round_robin,0,false,true))
-				assert(self:_store(self.storage,"topologies","choose_master",choose_master,0,false,true))
+				assert(self:_store(self.storage,"topology","replicated",replicated,0,false,true))
+				assert(self:_store(self.storage,"topology","round_robin",round_robin,0,false,true))
+				assert(self:_store(self.storage,"topology","choose_master",choose_master,0,false,true))
+				assert(self:_store(self.storage,"topology","nothing",nothing,0,false,true))
 				logger:info('loaded bootstrapped store')
 			else
 				logger:info('store was loaded from disk')

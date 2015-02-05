@@ -25,16 +25,16 @@ function main()
 		local system = table.remove(process.argv,1)
 		local command = table.remove(process.argv,1)
 		logger:debug("making request",system,command)
-		request('get','store','systems',system,nil,function(result,err)
+		request('get','store','systems',system,nil,{},function(result,err)
 			if err == "not found" then
 				logger:error("command was not found",system,command)
 				process.exit(1)
 			elseif err then
 				logger:error(err)
 				process.exit(1)
-			elseif result.cli and result.cli[command] then
+			elseif result and result.cli and result.cli[command] then
 				logger:debug("running script",result.cli[command])
-				request('get','store',system,result.cli[command],nil,function(result,err)
+				request('get','store',system,result.cli[command],nil,{},function(result,err)
 					if err then
 						logger:error("command was not found",system,command)
 						process.exit(1)
@@ -52,6 +52,8 @@ function main()
 								,__dirname = bucket
 								,process = process
 								,pairs = pairs
+								,pcall = pcall
+								,loadstring = loadstring
 								,logger = logger
 								,require = local_require(batton)
 								,store = bind_store(batton)})
@@ -98,25 +100,25 @@ end
 function bind_store(batton)
 	return
 		{fetch = function(_,bucket,id) 
-			batton.call = function(cb) request('get','store',bucket,id,nil,cb) end
+			batton.call = function(cb) request('get','store',bucket,id,nil,{},cb) end
 			coroutine.yield()
 			return unpack(batton.respose)
 		end
-		,delete = function(_,bucket,id) 
-			batton.call = function(cb) request('delete','store',bucket,id,nil,cb) end
+		,delete = function(_,bucket,id,last_known) 
+			batton.call = function(cb) request('delete','store',bucket,id,nil,{["last-known-update"]=last_known},cb) end
 			coroutine.yield()
 			return unpack(batton.respose)
 		end
-		,store = function(_,bucket,id,data) 
+		,store = function(_,bucket,id,data,last_known) 
 			logger:debug("making request",bucket,id,data)
-			batton.call = function(cb) request('post','store',bucket,id,data,cb) end
+			batton.call = function(cb) request('post','store',bucket,id,data,{["last-known-update"]=last_known},cb) end
 			coroutine.yield()
 			return unpack(batton.respose)
 		end}
 end
 
 
-function request(method,prefix,bucket,id,data,cb)
+function request(method,prefix,bucket,id,data,headers,cb)
 	logger:debug("request",method,prefix,bucket,id,data,cb)
 	local path
 	if id then
@@ -128,12 +130,12 @@ function request(method,prefix,bucket,id,data,cb)
 			{host = "127.0.0.1" -- these need to be pulled from the config file...
 			,port = 8081
 			,method = method
-			,path = path}
+			,path = path
+			,headers = headers}
 	if data then
 		data = JSON.stringify(data)
-		options.headers = 
-			{["content-length"] = #data
-			,["content-type"] = "application/json"}
+		options.headers["content-length"] = #data
+		options.headers["content-type"] = "application/json"
 	end
 	local req = http.request(options, function (res)
 		local chunks = {}
@@ -142,13 +144,24 @@ function request(method,prefix,bucket,id,data,cb)
 			end)
 		res:on('end',function()
 			if (res.status_code > 199) and (res.status_code < 300) then
-				local result = JSON.parse(table.concat(chunks))
-				cb(result)
+				if #chunks > 0 then
+					local result = JSON.parse(table.concat(chunks))
+					cb(result)
+				else
+					cb()
+				end
 			elseif res.status_code == 404 then
-				logger:error("bad response",table.concat(chunks))
+				if #chunks > 0 then
+					logger:error("bad response",table.concat(chunks))
+				end
+				
 				cb(nil,"not found")
 			else
-				cb(nil,res.status_code ..": "..table.concat(chunks))
+				if #chunks > 0 then
+					cb(nil,res.status_code ..": "..table.concat(chunks))
+				else
+					cb(nil,res.status_code)
+				end
 			end
 		end)
 	end)
@@ -160,8 +173,8 @@ function local_require(batton)
 	return function(object)
 		local sucess,ret = pcall(require,object)
 		if sucess then
-			logger:debug("required a local thing")
-			return unpack(ret)
+			logger:debug("required a local thing",ret)
+			return ret
 		else
 			logger:warning('I need to require a remote script')
 			batton.call = function(cb) cb() end

@@ -9,7 +9,7 @@
 -- Created :   18 Nov 2014 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
-local Plan = require('./plan/plan')
+local Plan = require('./plan')
 
 
 local Emitter = require('core').Emitter
