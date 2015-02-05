@@ -138,7 +138,11 @@ return function(Store)
 			if action == "store" then
 				local json = self:prepare_json(data)
 				json = JSON.stringify(json)
-				fs.writeFile(path,json,function() end)
+				fs.writeFile(path.. "~",json,function(err)
+					if not err then
+						fs.rename(path .. '~', path,function() end)
+					end
+				end)
 			elseif action == "delete" then
 				fs.unlink(path,function() end)
 			end
