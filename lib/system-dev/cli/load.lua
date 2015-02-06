@@ -67,7 +67,13 @@ function load_dir(directory,scripts,is_root)
 			
 			
 			logger:debug("reading file",path)
-			if path:sub(-4) == ".lua" then
+			if path:sub(-4) == ".txt" then
+				local success,res = pcall(function() return fs.readFileSync(path) end)
+				if success then
+					local name = file:sub(1,-5)
+					opts[name] = res
+				end
+			elseif path:sub(-4) == ".lua" then
 				local name = file:sub(1,-5)
 				local success,res = pcall(function() return fs.readFileSync(path) end)
 				if success then
@@ -105,10 +111,10 @@ return function(directory,system_name)
 	local system,scripts = load_dir(directory,{},true)
 	logger:info("was able to build system")
 
-	local success,description = pcall(function() return fs.readFileSync(directory .. "/description.txt") end)
-	local success,help = pcall(function() return fs.readFileSync(directory .. "/help.txt") end)
-	system.description = description
-	system.help = help
+	-- local success,description = pcall(function() return fs.readFileSync(directory .. "/description.txt") end)
+	-- local success,help = pcall(function() return fs.readFileSync(directory .. "/help.txt") end)
+	-- system.description = description
+	-- system.help = help
 	
 
 	local object,err = store:fetch("systems",system_name)
