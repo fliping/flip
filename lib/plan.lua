@@ -185,13 +185,13 @@ function Plan:compute(new_plan)
 		if (not new_add[lidx]) or (not self.plan[index]) then
 			-- if we run out of data, then we don't need to compare anymore
 			break
-		elseif (is_object and (self.plan[index].idx > new_add[lidx].idx)) or (not(is_object) and (self.plan[index] > new_add[lidx])) then
+		elseif (is_object and (self.plan[index].id > new_add[lidx].id)) or (not(is_object) and (self.plan[index] > new_add[lidx])) then
 			-- we need to add data points that are members of new_add and 
 			-- not members of self.plan
 			logger:debug("adding",new_add[lidx])
 			add[#add +1] = new_add[lidx]
 			lidx = lidx + 1
-		elseif (is_object and (self.plan[index].idx < new_add[lidx].idx)) or (not(is_object) and (self.plan[index] < new_add[lidx])) then
+		elseif (is_object and (self.plan[index].id < new_add[lidx].id)) or (not(is_object) and (self.plan[index] < new_add[lidx])) then
 			-- we need to remove data points that are members of self.plan and 
 			-- not members of new_add
 			logger:debug("removing",new_add[lidx])
