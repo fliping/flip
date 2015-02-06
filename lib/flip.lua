@@ -17,12 +17,12 @@ local string = require('string')
 local json = require('json')
 local math = require('math')
 local hrtime = require('uv').Process.hrtime
-local logger = require('./lib/logger')
-local Member = require('./lib/member')
-local System = require('./lib/system')
-local Packet = require('./lib/packet')
-local Api = require('./lib/api')
-local Store = require('./lib/store')
+local logger = require('./logger')
+local Member = require('./member')
+local System = require('./system')
+local Packet = require('./packet')
+local Api = require('./api')
+local Store = require('./store')
 
 local Flip = Emitter:extend()
 
@@ -79,7 +79,7 @@ function Flip:start()
 
 			-- double check that the default config has been added in
 			local config,err = self.store:fetch("config",self.config.id)
-			logger:info("got config",config,err,self.id)
+			logger:debug("got config",config,err,self.id)
 			if err == "not found" then
 				key = "secret"
 				config = 
@@ -127,7 +127,7 @@ end
 -- as member data changes, systems added/removed etc, this function
 -- will be passed in the changes.
 function Flip:process_server_update(kind,id,data)
-	logger:info("server update",kind,id,data)
+	logger:debug("server update",kind,id,data)
 	if kind == "store" then
 		local member = self.members[id]
 		if member then

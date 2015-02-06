@@ -44,7 +44,7 @@ function Plan:disable(cb)
 end
 
 function Plan:enable()
-	logger:info("enabling plan for ",self.sys_name)
+	logger:info("enabling plan for",self.sys_name)
 	self.enabled = true
 	self:next_plan()
 end
@@ -111,7 +111,7 @@ function Plan:next_plan()
 				if type(data) == "string" then
 					-- we grab the data from a bucket in the store
 					data = self.store:fetch_idx(data,nil)
-					logger:info("fetched data for plan",data)
+					logger:debug("fetched data for plan",data)
 				end
 
 				local alive,idx,err = self:fetch_members()

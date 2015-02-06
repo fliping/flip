@@ -101,11 +101,31 @@ return function(Store)
 					-- we store off our self so that we can be added back in.
 					local member = self:fetch("servers",self.id)
 					-- self:_store(storage,"servers",self.id,member,0,true,false)
-					
+					local old_storage = self.storage
 					self.storage = storage
 					-- this could take a long time to finish
-					-- TODO i need a better solution that also deleted data that
-					-- is not needed
+					-- TODO i need a much better solution then this.
+
+					-- delete all old objects that weren't tranfered over with
+					-- the sync
+					for b_id,bucket in pairs(old_storage.storage) do
+						new_bucket = self.storage.storage[b_id]
+						if not new_bucket then
+							for id,object in pairs(bucket) do
+								self:emit(b_id,"delete",id)
+								self:emit("sync",b_id,"delete",id,object)
+							end
+						else
+							for id,object in pairs(bucket) do
+								if not new_bucket[id] then
+									self:emit(b_id,"delete",id)
+									self:emit("sync",b_id,"delete",id,object)
+								end
+							end
+						end
+					end
+
+					-- updated the stores, systems, and servers
 					for _idx,b_id in pairs({'stores','systems','servers'}) do
 						local bucket = storage.storage[b_id]
 						if bucket then
@@ -115,6 +135,8 @@ return function(Store)
 							end
 						end
 					end
+
+					-- updated everything else
 					for b_id,bucket in pairs(storage.storage) do
 						if (b_id == "stores") or (b_id == "systems") or (b_id == "servers") then
 							logger:debug("skipping",b_id)
@@ -128,6 +150,9 @@ return function(Store)
 							end
 						end
 					end
+
+
+
 					logger:info("store is now in sync")
 					self:add_self_to_cluster(member,cb)
 				else

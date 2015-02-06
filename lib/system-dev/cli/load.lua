@@ -121,6 +121,9 @@ return function(directory,system_name)
 	if err and not (err == "not found") then
 		logger:error("unable to load system into flip",err)
 		process.exit(1)
+	elseif err then
+		system.bucket = "systems"
+		system.id = system_name
 	else
 		if object then
 			for key,value in pairs(object) do

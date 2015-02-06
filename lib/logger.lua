@@ -52,17 +52,16 @@ function Logger:initialize ()
 end
 
 function Logger:add_logger(level,id,fun)
-	if not self.loggers[id] then
-		if not fun then
-			fun = p
-		end
-
-		self.loggers[id] = fun
-
-		self:on('.' ..level,fun)
-	else
-		return 'already exists'
+	if self.loggers[id] then
+			self:remove_logger(id)
 	end
+	if not fun then
+		fun = p
+	end
+
+	self.loggers[id] = fun
+
+	self:on('.' ..level,fun)
 end
 
 function Logger:remove_logger(id)

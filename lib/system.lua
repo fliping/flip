@@ -55,11 +55,11 @@ function System:check_system(kind,id,system_config)
 		local plan = self.plans[id]
 		if plan then
 			plan:update(system_config)
-			logger:info("updated plan:",id)
+			logger:info("updated system:",id)
 		else
 			self:init_system(system_config)
 			self.plans[id] = Plan:new(system_config,id,self.flip,self.store)
-			logger:info("created plan:",id)
+			logger:info("created system:",id)
 		end
 	elseif kind == "delete" then
 		local plan = self.plans[id]
@@ -67,7 +67,7 @@ function System:check_system(kind,id,system_config)
 			self:stop_system(system_config)
 			self.plans[id] = nil
 			plan:disable(function() 
-				logger:info("removed plan:",id)
+				logger:info("removed system:",id)
 			end)
 		end
 	end
@@ -166,7 +166,7 @@ end
 
 function System:stop_system(system)
 	-- this should run the shutdown script, and remove all routes
-	logger:info("stopping system")
+	logger:info("stopping system",system.id)
 end
 
 return System
