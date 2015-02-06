@@ -53,7 +53,7 @@ end
 
 function Logger:add_logger(level,id,fun)
 	if self.loggers[id] then
-			self:remove_logger(id)
+			self:remove_logger(level,id)
 	end
 	if not fun then
 		fun = p
@@ -64,7 +64,7 @@ function Logger:add_logger(level,id,fun)
 	self:on('.' ..level,fun)
 end
 
-function Logger:remove_logger(id)
+function Logger:remove_logger(level,id)
 	local logger = self.loggers[id]
 	if not logger then
 		return 'not found'
