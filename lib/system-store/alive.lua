@@ -10,8 +10,8 @@
 ---------------------------------------------------------------------
 
 -- when a new master is chosen this script is called.
-return function(data,cb)
-	local member,err = store:fetch_idx("servers",data[1])
+return function(members,cb)
+	local member = members[1]
 	if (store.id == member.id) then
 		store:promote_to_master(cb)
 	else

@@ -83,9 +83,10 @@ return function(Store)
 					{init = "init"
 					,stop = "stop"
 					,alive = "update_master"
-					,["type"] = "choose_master"
+					,["type"] = "choose_one"
 					,help = fs.readFileSync('./lib/system-store/help.txt')
 					,description = fs.readFileSync('./lib/system-store/description.txt')
+					,data = "servers"
 					,endpoints =
 						{get = 
 							{["/store/sync/?version"] = "get-sync"
@@ -125,14 +126,14 @@ return function(Store)
 					{["$script"] = fs.readFileSync('./lib/system-topology/replicated.lua')}
 				local round_robin = 
 					{["$script"] = fs.readFileSync('./lib/system-topology/round_robin.lua')}
-				local choose_master = 
-					{["$script"] = fs.readFileSync('./lib/system-topology/choose_master.lua')}
+				local choose_one = 
+					{["$script"] = fs.readFileSync('./lib/system-topology/choose_one.lua')}
 				local nothing = 
 					{["$script"] = fs.readFileSync('./lib/system-topology/nothing.lua')}
 
 				assert(self:_store(self.storage,"topology","replicated",replicated,0,false,true))
 				assert(self:_store(self.storage,"topology","round_robin",round_robin,0,false,true))
-				assert(self:_store(self.storage,"topology","choose_master",choose_master,0,false,true))
+				assert(self:_store(self.storage,"topology","choose_one",choose_one,0,false,true))
 				assert(self:_store(self.storage,"topology","nothing",nothing,0,false,true))
 				logger:info('loaded bootstrapped store')
 			else

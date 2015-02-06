@@ -106,39 +106,51 @@ function Plan:next_plan()
 		if err and not (err == "old data") then
 			logger:warning("topology was not found",self.system.type)
 		else
-			local alive,idx,err = self:fetch_members()
-			if err and not (err == "old data") then
-				logger:warning("unable to start plan",err)
-				return 
-			end
-			-- we ask the topology what data points are needed
-			local add,remove = topology.script(self.system.data,idx,alive)
-			logger:debug("toplogy returned",self.system.type,add,remove)
-			local new_plan = {add = add,remove = remove}
+			if self.system.data then
+				local data = self.system.data
+				if type(data) == "string" then
+					-- we grab the data from a bucket in the store
+					data = self.store:fetch_idx(data,nil)
+					logger:info("fetched data for plan",data)
+				end
 
-			-- a plan was made and is still waiting to be run, we have a new one
-			-- so lets clear it out
-			if self.plan_activation_timer then
-				logger:debug("clearing timer")
+				local alive,idx,err = self:fetch_members()
+				if err and not (err == "old data") then
+					logger:warning("unable to start plan",err)
+					return 
+				end
+			
+				-- we ask the topology what data points are needed
+				local add,remove = topology.script(data,idx,alive)
+				logger:debug("toplogy returned",self.system.type,add,remove)
+				local new_plan = {add = add,remove = remove}
 
-				timer.clearTimer(self.plan_activation_timer)
-			end
+				-- a plan was made and is still waiting to be run, we have a new one
+				-- so lets clear it out
+				if self.plan_activation_timer then
+					logger:debug("clearing timer")
 
-			if self.queue then
-				logger:debug("queueing change")
-				-- we are currently running scripts, lets wait for them to be done
-				self.queue = new_plan
+					timer.clearTimer(self.plan_activation_timer)
+				end
+
+				if self.queue then
+					logger:debug("queueing change")
+					-- we are currently running scripts, lets wait for them to be done
+					self.queue = new_plan
+				else
+
+					-- we delay how long it takes for a new plan to be put in place
+					-- so that if any members change at the exact smae time, the 
+					-- changes get pulled into a single plan update
+					logger:debug("setting plan",new_plan)
+					local me = self
+					self.plan_activation_timer = timer.setTimeout(self.new_plan_delay,function(a_plan)
+						me.plan_activation_timer = nil
+						me:compute(a_plan)
+					end,new_plan)
+				end
 			else
-
-				-- we delay how long it takes for a new plan to be put in place
-				-- so that if any members change at the exact smae time, the 
-				-- changes get pulled into a single plan update
-				logger:debug("setting plan",new_plan)
-				local me = self
-				self.plan_activation_timer = timer.setTimeout(self.new_plan_delay,function(a_plan)
-					me.plan_activation_timer = nil
-					me:compute(a_plan)
-				end,new_plan)
+				logger:info("no data attached to system")
 			end
 		end
 	end
