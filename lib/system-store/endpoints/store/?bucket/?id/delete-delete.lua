@@ -20,7 +20,9 @@ return function(req,res)
 	if err then
 		local code = error_code(err)
 		res:writeHead(code,{})
-		res:finish(JSON.stringify({error = err,updated = store:prepare_json(updated)}))
+		-- we can't stringify a function
+		updated.script = nil
+		res:finish(JSON.stringify({error = err,updated = updated}))
 	else
 		res:writeHead(204,{})
 		res:finish()

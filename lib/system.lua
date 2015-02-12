@@ -95,8 +95,9 @@ function System:enable()
 			systems = {}
 		end
 
-		
-		for sys_id,system_config in pairs(systems) do
+		logger:info(systems)
+		for _idx,system_config in pairs(systems) do
+			sys_id = system_config.id
 			self:init_system(system_config)
 
 			local plan = Plan:new(system_config,sys_id,self.flip,self.store)

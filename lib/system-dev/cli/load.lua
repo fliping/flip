@@ -42,12 +42,11 @@ function load_routes(directory,route,routes,scripts)
 
 					local key = file:sub(1,-5)
 					if scripts[key] then
-						logger:warning("route conflict",scripts[key])
+						logger:warning("route conflict, using previously loaded script",scripts[key])
 					else
-
 						scripts[key] = {["$script"] = res}	
-						routes[method][route] = key
 					end
+					routes[method][route] = key
 				end
 			else
 				logger:info("loading folder?",path)
@@ -118,7 +117,7 @@ return function(directory,system_name)
 	
 
 	local object,err = store:fetch("systems",system_name)
-	if err and not (err == "not found") then
+	if err and not (err == "MDB_NOTFOUND: No matching key/data pair found") then
 		logger:error("unable to load system into flip",err)
 		process.exit(1)
 	elseif err then

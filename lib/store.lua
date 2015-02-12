@@ -14,6 +14,11 @@ local logger = require('./logger')
 local JSON = require('json')
 local table = require('table')
 local hrtime = require('uv').Process.hrtime
+local lmmdb = require("./lmmdb")
+Env = lmmdb.Env
+DB = lmmdb.DB
+Txn = lmmdb.Txn
+Cursor = lmmdb.Cursor
 
 local Store = Emitter:extend()
 require('./store/failover')(Store)
@@ -23,10 +28,7 @@ function Store:initialize(path,id,version,ip,port,api)
 	self.api = api
 	self.id = id
 	self.version = version
-	self.storage = {
-		storage = {},
-		storage_idx = {}
-	}
+	self.scripts = {}
 	self.ip = ip
 	self.port = port
 	self.is_master = true
@@ -39,62 +41,77 @@ function Store:upto_date()
 	return self.is_master or not self.connection
 end
 
-function Store:fetch(b_id,id)
-	local bucket = self.storage.storage[b_id]
-	if bucket then
-		if id then
-			local object = bucket[id]
+function Store:fetch(b_id,id,cb)
+	-- this should be a read only transaction
+	local txn,err = Env.txn_begin(self.env,nil,Txn.MDB_RDONLY)
+	if err then
+		return nil,err
+	end
 
-			if not(object == nil) then
-				if self:upto_date() then
-					return object
-				else
-					return object,"old data"
-				end
-			else
-				return nil,"not found"
-			end
+	local objects,err = DB.open(txn,"objects",0)
+	if err then
+		logger:info("aborted",err)
+		Txn.abort(txn)
+		return nil,err
+	end
+
+
+	if id then
+		local json,err = Txn.get(txn,objects, b_id .. ":" .. id)
+		Txn.abort(txn)
+		if err then
+			logger:info("err",err)
+			return nil,err
 		else
-			if self:upto_date() then
-				return bucket
-			else
-				return bucket,"old data"
-			end
+			json = JSON.parse(json)
+			json.script = self.scripts[b_id .. ":" .. id]
+			return json
 		end
 	else
-		return nil,"not found"
-	end
-end
+		local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
+		if err then
+			logger:info("err",err)
+			return nil,err
+		end
+		local cursor,err = Cursor.open(txn,buckets)
+		if err then
+			logger:info("err",err)
+			return nil,err
+		end
 
-function Store:fetch_idx(b_id,idx)
-	local bucket = self.storage.storage_idx[b_id]
-	if bucket then
-		if idx then
-			local object = bucket[idx]
-			if not(object == nil) then
-				if self:upto_date() then
-					return object
-				else
-					return object,"old data"
-				end
-			else
-				return nil,"not found"
+		local key,id = Cursor.get(cursor,b_id,Cursor.MDB_SET_KEY)
+		local acc
+		if cb then
+			while key == b_id do
+				json,err = Txn.get(txn,objects, b_id .. ":" .. id)
+				json = JSON.parse(json)
+				json.script = self.scripts[b_id .. ":" .. id]
+				cb(key,json)
+				key,id,err = Cursor.get(cursor,key,Cursor.MDB_NEXT_DUP)
 			end
+			Cursor.close(cursor)
+			Txn.abort(txn)
 		else
-			if self:upto_date() then
-				return bucket
-			else
-				return bucket,"old data"
+			acc = {}
+			while key == b_id do
+				local json,err = Txn.get(txn,objects, b_id .. ":" .. id)
+				json = JSON.parse(json)
+				json.script = self.scripts[b_id .. ":" .. id]
+				acc[#acc + 1] = json
+				key,id,err = Cursor.get(cursor,key,Cursor.MDB_NEXT_DUP)
 			end
 		end
-	else
-		return nil,"not found"
+
+		Cursor.close(cursor)
+		Txn.abort(txn)
+		return acc
 	end
+
 end
 
 function Store:store(b_id,id,data,last_known)
 	if self.is_master then
-		return self:_store(self.storage,b_id,id,data,last_known,false,true)
+		return self:_store(b_id,id,data,last_known,false,true)
 	else
 		return {master = {ip = self.master.ip, port = self.master.port}},"read only slave"
 	end
@@ -102,89 +119,133 @@ end
 
 function Store:delete(b_id,id,last_known)
 	if self.is_master then
-		return self:_delete(self.storage,b_id,id,last_known,false,true)
+		return self:_delete(b_id,id,last_known,false,true)
 	else
 		return {master = {ip = self.master.ip, port = self.master.port}},"read only slave"
 	end
 end
 
-function Store:_store(store,b_id,id,data,last_known,sync,broadcast)
-	data.bucket = b_id
-	local bucket = store.storage[b_id]
-	local bucket_idx = store.storage_idx[b_id]
-	if bucket == nil then
-		bucket = {}
-		bucket_idx = {}
-		store.storage[b_id] = bucket
-		store.storage_idx[b_id] = bucket_idx
+function Store:_store(b_id,id,data,last_known,sync,broadcast)
+	local key = b_id .. ":" .. id
+	logger:info("going to store",key,data,last_known,sync,broadcast)
+	local txn,err = Env.txn_begin(self.env,nil,0)
+	if err then
+		logger:info("can't begin txn",key)
+		return nil,err
 	end
-	local object = bucket[id]
-	if sync == false then
-		if not(object == nil) then
-			
-			if not (object.last_updated == last_known) then
-				return object,"try again"
+
+	local objects,err = DB.open(txn,"objects",0)
+	if err then
+		logger:info("can't open",key)
+		Txn.abort(txn)
+		return nil,err
+	end
+
+	local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
+	if err then
+		logger:info("can't open",key)
+		Txn.abort(txn)
+		return nil,err
+	end
+
+	if not sync then
+		local json,err = Txn.get(txn,objects,key)
+		if err then
+			err = Txn.put(txn,buckets,b_id,id,Txn.MDB_NODUPDATA)
+			if err then
+				logger:error("unable to add id to bucket",err)
+				return nil,err
 			end
-			data.last_updated = math.floor(hrtime() * 100)
-			data.created_at = object.created_at
-			data.idx = object.idx
-		else
 			data.created_at = math.floor(hrtime() * 100)
 			data.last_updated = data.created_at
-			data.idx = #bucket_idx + 1
-		end
-	end
-	data.id = id
-	local err = self:compile(data,b_id,id)
-	if err then
-		return nil,err
-	else
-		local updated = true
-		-- i need to check if there were any changes, so that I know
-		-- if i need to broadcast those changes
-		bucket[id] = data
-		bucket_idx[data.idx] = data
+		else
+			-- there has got to be a better way to do this.
+			local obj = JSON.parse(json)
 
-		if broadcast and updated then
-			self:emit(b_id,"store",id,data)
-			self:emit("sync",b_id,"store",id,data)
+			if not (obj.last_updated == last_known) then
+				logger:info("old data",key)
+				return obj,"try again"
+			end
+			
+			-- we carry over the created_at
+			data.created_at = obj.created_at
+			data.last_updated = math.floor(hrtime() * 100)
 		end
-		return data
+		data.bucket = b_id
+		data.id = id
+	end
+
+
+	local encoded = JSON.stringify(data)
+	local err = Txn.put(txn,objects,key,encoded,0)
+
+	if err then
+		logger:info("txn errored",key,err)
+		Txn.abort(txn)
+		return nil,err
+	end
+
+	-- commit all changes
+	err = Txn.commit(txn)
+	
+	if err then
+		logger:info("commit errored",key)
+		return nil,err
+	end
+	
+	logger:info("stored",key)
+
+	-- compile any scripts and store them off.
+	fn = self:compile(data,b_id,id)
+	self.scripts[key] = fn
+
+	-- send any updates off
+	local updated = true
+	if broadcast and updated then
+		logger:info("braodcasting",b_id,"store",id,data)
+		self:emit(b_id,"store",id,data)
+		self:emit("sync",b_id,"store",id,data)
 	end
 end
 
-function Store:_delete(store,b_id,id,last_known,sync,broadcast)
-	local bucket = store.storage[b_id]
-	local bucket_idx = store.storage_idx[b_id]
-	if not(bucket == nil) then
-		local object = bucket[id]
-		if not(object == nil) then
-			if (sync == false) and not(object.last_updated == last_known) then
-				return object,"try again"
-			end
-			bucket[id] = nil
-			-- just a little expensive. and will cause data elements
-			-- to be redistributed for anything other then replicated
-			table.remove(bucket_idx,object.idx)
-			if #bucket_idx == 0 then
-				store.storage[b_id] = nil
-				store.storage_idx[b_id] = nil
-			end
+function Store:_delete(b_id,id,last_known,sync,broadcast)
+	local txn,err = Env.txn_begin(self.env,nil,0)
+	if err then
+		return nil,err
+	end
 
-			-- we need to re-adjust the idx member in all elements
-			-- this could get extremely expensive. TODO
-			-- maybe this should be a linked list? insertions would always
-			-- be at the end, but removals would only need to jump to the
-			-- correct element. and we know the correct already.
-			for i = object.idx, #bucket_idx do
-				local data = bucket_idx[i]
-				data.idx = data.idx - 1
-			end
-			if broadcast then
-				self:emit(b_id,"delete",id)
-				self:emit("sync",b_id,"delete",id,object)
-			end
-		end
+	local objects,err = DB.open(txn,"objects",0)
+	local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
+	if err then
+		Txn.abort(txn)
+		return nil,err
+	end
+	local json,err = Txn.get(txn,objects,key)
+	-- there has got to be a better way to do this.
+	local obj = JSON.parse(json)
+	if not obj then
+		return
+	end
+	if not (obj.last_updated == last_known) then
+		Txn.abort(txn)
+		return obj,"try again"
+	end
+
+	local err = Txn.delete(txn,objects,key)
+	local err = Txn.delete(txn,buckets,b_id,id)
+
+	-- commit all changes
+	err = Txn.commit(txn)
+	
+	if err then
+		return nil,err
+	end
+
+	self.scripts[key] = nil
+
+	if broadcast then
+		self:emit(b_id,"delete",id)
+		self:emit("sync",b_id,"delete",id,object)
 	end
 end
 
@@ -207,7 +268,7 @@ function Store:compile(data,bucket,id)
 		logger:error("script failed to compile",err)
 		return err
 	elseif fn then
-		data.script = fn()
+		return fn()
 	end
 end
 
@@ -220,29 +281,6 @@ function Store:build(data,script,env,bucket,id)
 		setfenv(fn,env)
 		return fn
 	end
-end
-
-function Store:prepare_json(orig)
-	local copy
-	if type(orig) == 'table' then
-		copy = {}
-		for orig_key, orig_value in pairs(orig) do
-			if type(orig_value) == 'table' then
-				local obj = {}
-				for key, value in pairs(orig_value) do
-					if not (type(value) == 'function') then
-						obj[key] = value
-					end
-				end
-				copy[orig_key] = obj
-			elseif not (type(orig_value) == 'function') then
-				copy[orig_key] = orig_value
-			end
-		end
-	else -- number, string, boolean, etc
-		copy = orig
-	end
-	return copy
 end
 
 return Store

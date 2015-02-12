@@ -71,7 +71,7 @@ function Plan:update(system)
 end
 
 function Plan:fetch_members()
-	local servers,err = self.store:fetch_idx("servers")
+	local servers,err = self.store:fetch("servers")
 	if err and not (err == "old data") then
 		return nil,nil,err
 	end
@@ -110,7 +110,7 @@ function Plan:next_plan()
 				local data = self.system.data
 				if type(data) == "string" then
 					-- we grab the data from a bucket in the store
-					data = self.store:fetch_idx(data,nil)
+					data = self.store:fetch(data,nil)
 					logger:debug("fetched data for plan",data)
 				end
 

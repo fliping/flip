@@ -15,7 +15,6 @@ local JSON = require('json')
 local http = require('http')
 
 function main()
-	logger:add_logger('info','console',function(...) p(os.date("%x %X"),...) end)
 	logger:debug("entering cli mode")
 	local system = table.remove(process.argv,1)
 	local command = table.remove(process.argv,1)

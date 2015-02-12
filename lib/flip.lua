@@ -33,6 +33,8 @@ function Flip:initialize(config)
 	self.member_count = 0
 	-- self.iservers = {}
 	self.alive = {}
+	self.map = {}
+	self.inverse_map = {}
 	self.packet = Packet:new()
 	self.api = Api:new(self,config.api.port,config.api.ip)
 
@@ -47,19 +49,15 @@ function Flip:start()
 	-- we create a system so that it is setup by the time that servers
 	-- are added in, it starts working and creating plans
 	self.system = System:new(self.store,self)
-	
-
-	-- we also want all servers to be setup correctly by the time we
-	-- set this server to be active
-	self.store:on("servers",function(kind,id,data) self:process_server_update(kind,id,data) end)
 
 	self.store:open(function(err)
 		if not err then
 
 			-- if I'm not a member of the cluster, lets set that up.
 			
-			local members,err = self.store:fetch("servers",self.config.id)
-			if err == "not found" then
+			local member,err = self.store:fetch("servers",self.config.id)
+			logger:info("found member",member,err)
+			if err == "MDB_NOTFOUND: No matching key/data pair found" then
 				logger:info("bootstrapping node into single cluster")
 				me = 
 					{ip = self.config.gossip.ip
@@ -77,10 +75,20 @@ function Flip:start()
 				process.exit(1)
 			end
 
+			local members = self.store:fetch("servers")
+			-- load all members into the monitor
+			logger:info("bootstrapping members",members)
+			for _idx,member in pairs(members) do
+				self:process_server_update("store",member.id,member)
+			end
+
+			-- we subscribe to any changes in the servers bucket
+			self.store:on("servers",function(kind,id,data) self:process_server_update(kind,id,data) end)
+
 			-- double check that the default config has been added in
 			local config,err = self.store:fetch("config",self.config.id)
 			logger:debug("got config",config,err,self.id)
-			if err == "not found" then
+			if err == "MDB_NOTFOUND: No matching key/data pair found" then
 				key = "secret"
 				config = 
 					{["gossip_interval"] = 1000
@@ -127,12 +135,14 @@ end
 -- as member data changes, systems added/removed etc, this function
 -- will be passed in the changes.
 function Flip:process_server_update(kind,id,data)
-	logger:debug("server update",kind,id,data)
+	logger:info("server update",kind,id,data)
 	if kind == "store" then
 		local member = self.members[id]
 		if member then
 			member:update(data)
 		else
+			self.map[id] = #self.map + 1
+			self.inverse_map[self.map[id]] = id
 			self.member_count = self.member_count +1
 			member = Member:new(id,data,self.config)
 			self.members[id] = member
@@ -146,6 +156,8 @@ function Flip:process_server_update(kind,id,data)
 		if member then
 			self.member_count = self.member_count -1
 			member:destroy()
+			self.inverse_map[self.map[id]] = nil
+			self.map[id] = nil
 		end
 		self.system:regen(data.systems)
 	end
@@ -158,9 +170,9 @@ function Flip:process_server_update(kind,id,data)
 end
 
 function Flip:find_member(key)
+	logger:info("finding",key,self.members)
 	if type(key) == "number" then
-		local server = self.store:fetch_idx("servers",key)
-		return self.members[server.id]
+		return self.members[inverse_map[key]]
 	else
 		-- server =  self.store:fetch("servers",key)
 		return self.members[key]
@@ -290,7 +302,7 @@ function Flip:track(id,member,new_state)
 
 	local server,err = self.store:fetch("servers",id)
 	if err and not (err == "old data") then
-		logger:info("member doesn't exist anymore")
+		logger:info("member doesn't exist anymore",server,err,id)
 		process.exit(1)
 	end
 	
@@ -302,9 +314,9 @@ function Flip:track(id,member,new_state)
 
 	-- this is used to build the packets
 	if new_state == 'alive' then
-		self.alive[server.idx] = true
+		self.alive[self.map[id]] = true
 	elseif (new_state == 'down') or (new_state == 'probably_down') then
-		self.alive[server.idx] = false
+		self.alive[self.map[id]] = false
 	end
 end
 

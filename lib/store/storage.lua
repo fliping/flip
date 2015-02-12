@@ -11,40 +11,47 @@
 local logger = require('../logger')
 local JSON = require('json')
 local fs = require('fs')
+local lmmdb = require('../lmmdb')
+Env = lmmdb.Env
+Txn = lmmdb.Txn
+Cursor = lmmdb.Cursor
+DB = lmmdb.DB
 
 return function(Store)
 
 	function Store:load_from_disk(cb)
-		local files,err = fs.readdir(self.db_path,function(err,files)
-			if err then
-				cb(err)
+		fs.mkdir(self.db_path, "0755", function (is_new)
+			if is_new and not (is_new.code == "EEXIST") then
+				cb(false,is_new)
 			else
-				logger:debug("loading",files)
-				for _idx,file in pairs(files) do
-					local path = self.db_path .. "/" .. file
-					if file:sub(-1) == "~" then
-						fs.unlink(path,function() end)
-					else
-						local json,err = fs.readFileSync(path)
-						if err then
-							logger:error("it errored",err)
-							process.exit(1)
-						else
-							local object = JSON.parse(json)
-							self:_store(self.storage,object.bucket,object.id,object,nil,false,true)
-						end
-					end
+				local env,err = Env.create()
+				Env.set_maxdbs(env,3)
+				if err then 
+					logger:fatal('unable to create store',err)
+					process.exit(1)
 				end
-				cb()
+				err = Env.open(env,self.db_path,0,0755)
+				if err then 
+					logger:fatal('unable to open store',err)
+					process.exit(1)
+				end
+				self.env = env
+				local txn = Env.txn_begin(env,nil,0)
+				logger:info("going to open","objects",DB.MDB_CREATE)
+				DB.open(txn,"objects",DB.MDB_CREATE)
+				logger:info("going to open","buckets",DB.MDB_CREATE)
+				DB.open(txn,"buckets",DB.MDB_DUPSORT + DB.MDB_CREATE)
+				Txn.commit(txn)
+				cb(not (is_new == nil),err)
 			end
 		end)
 	end
 
 	function Store:open(cb)
-		self:load_from_disk(function(err)
-			if err then
+		self:load_from_disk(function(need_bootstrap,err)
+			logger:info(need_bootstrap,err)
+			if need_bootstrap then
 				logger:info("bootstrapping store")
-				self:start_async_io()
 
 				
 				-- we use the dev load command to load all the default
@@ -61,35 +68,18 @@ return function(Store)
 				env.store = self
 				setfenv(load,env)
 
-				fs.mkdir(self.db_path,"0700",function() end)
-
 				load(__dirname .. '/../system-topology','topology')
 				load(__dirname .. '/../system-store','store')
 				load(__dirname .. '/../system-dev','dev')
 
 				logger:info('loaded bootstrapped store')
+			elseif err then
+				logger:fatal("unable to open disk store",err)
+				process.exit(1)
 			else
 				logger:info('store was loaded from disk')
-				self:start_async_io()
 			end
 			cb()
-		end)
-	end
-
-	function Store:start_async_io()
-		self:on("sync",function(b_id,action,id,data)
-			local path = self.db_path .. "/" .. b_id .. ":" .. id .. ".json"
-			if action == "store" then
-				local json = self:prepare_json(data)
-				json = JSON.stringify(json)
-				fs.writeFile(path.. "~",json,function(err)
-					if not err then
-						fs.rename(path .. '~', path,function() end)
-					end
-				end)
-			elseif action == "delete" then
-				fs.unlink(path,function() end)
-			end
 		end)
 	end
 end

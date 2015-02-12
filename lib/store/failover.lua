@@ -103,7 +103,9 @@ return function(Store)
 					-- self:_store(storage,"servers",self.id,member,0,true,false)
 					local old_storage = self.storage
 					self.storage = storage
-					-- this could take a long time to finish
+
+					-- this will take a long time to finish when we have a lot
+					-- of data stored.
 					-- TODO i need a much better solution then this.
 
 					-- delete all old objects that weren't tranfered over with

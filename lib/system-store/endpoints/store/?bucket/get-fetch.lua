@@ -18,7 +18,15 @@ return function(req,res)
 		res:finish(JSON.stringify({error = err}))
 	else
 		res:writeHead(200,{})
-		local prepared = store:prepare_json(object)
-		res:finish(JSON.stringify(prepared))
+		if req.env.id then
+			-- we can't stringify a function
+			object.script = nil
+		else
+			for _idx,obj in pairs(object) do
+				-- we can't stringify a function
+				obj.script = nil
+			end
+		end
+		res:finish(JSON.stringify(object))
 	end
 end

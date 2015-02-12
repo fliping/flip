@@ -28,13 +28,17 @@ return function(req,res)
 			local last_known = req.headers["last-known-update"] or data.last_updated
 			
 			local object,err = store:store(req.env.bucket,req.env.id,data,last_known)
+			if object then
+				-- we can't stringify a function
+				object.script = nil
+			end
 			if err then
 				local code = error_code(err)
 				res:writeHead(code,{})
-				res:finish(JSON.stringify({error = err,updated = store:prepare_json(object)}))
+				res:finish(JSON.stringify({error = err,updated = object}))
 			else
 				res:writeHead(201,{})
-				res:finish(JSON.stringify(store:prepare_json(object)))
+				res:finish(JSON.stringify(object))
 			end
 		end
 	end)

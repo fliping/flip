@@ -22,6 +22,14 @@ return function (dir,name)
 		dir = './' .. name
 	end
 
-	fs.mkdir()
+	fs.mkdirSync(dir,"0755")
+	fs.mkdirSync(dir .. '/endpoints',"0755")
+	fs.mkdirSync(dir .. '/cli',"0755")
+
+	fs.writeSync(dir .. '/help.txt',help)
+	fs.writeSync(dir .. '/dexcription.txt',description)
+
+	fs.mkdirSync(dir .. '/endpoints/help',"0755")
+	fs.writeSync(dir .. '/endpoints/help/get-redirect.lua',get_redirect)
 	
 end
