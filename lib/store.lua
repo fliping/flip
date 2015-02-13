@@ -50,7 +50,7 @@ function Store:fetch(b_id,id,cb)
 
 	local objects,err = DB.open(txn,"objects",0)
 	if err then
-		logger:info("aborted",err)
+		logger:info("unable to open 'objects' DB",err)
 		Txn.abort(txn)
 		return nil,err
 	end
@@ -60,7 +60,6 @@ function Store:fetch(b_id,id,cb)
 		local json,err = Txn.get(txn,objects, b_id .. ":" .. id)
 		Txn.abort(txn)
 		if err then
-			logger:info("err",err)
 			return nil,err
 		else
 			json = JSON.parse(json)
@@ -70,12 +69,12 @@ function Store:fetch(b_id,id,cb)
 	else
 		local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
 		if err then
-			logger:info("err",err)
+			logger:info("unable to open 'buckets' DB",err)
 			return nil,err
 		end
 		local cursor,err = Cursor.open(txn,buckets)
 		if err then
-			logger:info("err",err)
+			logger:info("unable to create cursor",err)
 			return nil,err
 		end
 
@@ -127,7 +126,6 @@ end
 
 function Store:_store(b_id,id,data,last_known,sync,broadcast)
 	local key = b_id .. ":" .. id
-	logger:info("going to store",key,data,last_known,sync,broadcast)
 	local txn,err = Env.txn_begin(self.env,nil,0)
 	if err then
 		logger:info("can't begin txn",key)
@@ -136,14 +134,21 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 
 	local objects,err = DB.open(txn,"objects",0)
 	if err then
-		logger:info("can't open",key)
+		logger:info("can't open 'objects' DB",key)
 		Txn.abort(txn)
 		return nil,err
 	end
 
 	local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
 	if err then
-		logger:info("can't open",key)
+		logger:info("can't open 'buckets' DB",key)
+		Txn.abort(txn)
+		return nil,err
+	end
+
+	local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
+	if err then
+		logger:info("can't open 'logs' DB",key)
 		Txn.abort(txn)
 		return nil,err
 	end
@@ -153,7 +158,7 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 		if err then
 			err = Txn.put(txn,buckets,b_id,id,Txn.MDB_NODUPDATA)
 			if err then
-				logger:error("unable to add id to bucket",err)
+				logger:error("unable to add id to 'buckets' DB",err)
 				return nil,err
 			end
 			data.created_at = math.floor(hrtime() * 100)
@@ -161,12 +166,6 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 		else
 			-- there has got to be a better way to do this.
 			local obj = JSON.parse(json)
-
-			if not (obj.last_updated == last_known) then
-				logger:info("old data",key)
-				return obj,"try again"
-			end
-			
 			-- we carry over the created_at
 			data.created_at = obj.created_at
 			data.last_updated = math.floor(hrtime() * 100)
@@ -180,7 +179,7 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 	local err = Txn.put(txn,objects,key,encoded,0)
 
 	if err then
-		logger:info("txn errored",key,err)
+		logger:error("unable to add value to 'objects' DB",key,err)
 		Txn.abort(txn)
 		return nil,err
 	end
@@ -189,7 +188,7 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 	err = Txn.commit(txn)
 	
 	if err then
-		logger:info("commit errored",key)
+		logger:error("unable to commit transaction",err)
 		return nil,err
 	end
 	
@@ -202,7 +201,6 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 	-- send any updates off
 	local updated = true
 	if broadcast and updated then
-		logger:info("braodcasting",b_id,"store",id,data)
 		self:emit(b_id,"store",id,data)
 		self:emit("sync",b_id,"store",id,data)
 	end
@@ -215,8 +213,22 @@ function Store:_delete(b_id,id,last_known,sync,broadcast)
 	end
 
 	local objects,err = DB.open(txn,"objects",0)
+	if err then
+		logger:info("can't open 'objects' DB")
+		Txn.abort(txn)
+		return nil,err
+	end
+
 	local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
 	if err then
+		logger:info("can't open 'objects' DB")
+		Txn.abort(txn)
+		return nil,err
+	end
+
+	local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
+	if err then
+		logger:info("can't open 'logs' DB")
 		Txn.abort(txn)
 		return nil,err
 	end
@@ -225,10 +237,6 @@ function Store:_delete(b_id,id,last_known,sync,broadcast)
 	local obj = JSON.parse(json)
 	if not obj then
 		return
-	end
-	if not (obj.last_updated == last_known) then
-		Txn.abort(txn)
-		return obj,"try again"
 	end
 
 	local err = Txn.delete(txn,objects,key)
@@ -262,7 +270,7 @@ function Store:compile(data,bucket,id)
 			,logger = logger
 			,JSON = JSON
 			,error_code = self.api.error_code
-			,["require"] = function() end}
+			,require = function() end} -- this needs to be fixed.
 	local fn,err = self:build(data,script,env,bucket,id)
 	if err then
 		logger:error("script failed to compile",err)

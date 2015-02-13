@@ -83,8 +83,6 @@ function Api:error_code(err)
 		return 404
 	elseif (err == "old data") then
 		return 203
-	elseif (err == "try again") then
-		return 400
 	else
 		return 500
 	end

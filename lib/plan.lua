@@ -51,9 +51,9 @@ end
 
 
 function Plan:update(system)
-	local topology,err = self.store:fetch("topology",system.type)
+	local topology,err = self.store:fetch("topology-scripts",system.type)
 	if err then
-		logger:fatal("unknown data distribution type",system.type,err)
+		logger:fatal("unknown data distribution type","topology-scripts",system.type,err)
 		process.exit(1)
 	end
 
@@ -102,7 +102,7 @@ end
 
 function Plan:next_plan()
 	if self.enabled then
-		local topology,err = self.store:fetch("topology",self.system.type)
+		local topology,err = self.store:fetch("topology-scripts",self.system.type)
 		if err and not (err == "old data") then
 			logger:warning("topology was not found",self.system.type)
 		else

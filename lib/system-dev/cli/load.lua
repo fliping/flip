@@ -134,11 +134,11 @@ return function(directory,system_name)
 	end
 	logger:info("going to load scripts into system",system.id)
 	for id,script in pairs(scripts) do
-		local obj,err = store:fetch(system.id,id)
+		local obj,err = store:fetch(system.id .. '-scripts',id)
 		if obj then
 			script.last_updated = obj.last_updated
 		end
-		local obj,err = store:store(system.id,id,script)
+		local obj,err = store:store(system.id .. '-scripts',id,script)
 		if err then
 			logger:info(err)
 		end

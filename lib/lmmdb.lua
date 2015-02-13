@@ -293,8 +293,14 @@ end
 
 function Txn.put(txn,dbi,key,data,flags)
 	local index = ffi.new("MDB_val[1]")
-	index[0].mv_data = ffi.cast("void*",key)
-	index[0].mv_size = #key
+	
+	if type(key) == "number" then
+		index[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",key))
+		index[0].mv_size = ffi.sizeof("size_t")
+	else
+		index[0].mv_data = ffi.cast("void*",key)
+		index[0].mv_size = #key
+	end
 	local value = ffi.new("MDB_val[1]")
 	value[0].mv_data = ffi.cast("void*",data)
 	value[0].mv_size = #data
@@ -305,8 +311,13 @@ end
 function Txn.get(txn,dbi,key)
 	local value = ffi.new("MDB_val[1]")
 	local lookup = ffi.new("MDB_val[1]")
-	lookup[0].mv_data = ffi.cast("void*",key)
-	lookup[0].mv_size = #key
+	if type(key) == "number" then
+		lookup[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",key))
+		lookup[0].mv_size = ffi.sizeof("size_t")
+	else
+		lookup[0].mv_data = ffi.cast("void*",key)
+		lookup[0].mv_size = #key
+	end
 	local err = lmdb.mdb_get(txn,dbi,lookup,value)
 	local string
 	if err == 0 then

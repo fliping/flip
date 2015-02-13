@@ -131,7 +131,7 @@ end
 
 function System:init_system(system)
 	if system.init then
-		local script,err = self.store:fetch(system.id,system.init)
+		local script,err = self.store:fetch(system.id .. '-scripts',system.init)
 		if script and script.script then
 			logger:info("running",script)
 			-- init scrips are primarily for starting up api endpoints
@@ -139,7 +139,7 @@ function System:init_system(system)
 		end
 		local build = function(key)
 			return function(req,res)
-				local script,err = self.store:fetch(system.id,key)
+				local script,err = self.store:fetch(system.id .. '-scripts',key)
 				if err then
 					local code = self.store.api:error_code(err)
 					res:writeHead(code,{})

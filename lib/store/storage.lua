@@ -39,6 +39,14 @@ return function(Store)
 				local txn = Env.txn_begin(env,nil,0)
 				logger:info("going to open","objects",DB.MDB_CREATE)
 				DB.open(txn,"objects",DB.MDB_CREATE)
+				logger:info("going to open","log",DB.MDB_CREATE)
+				local logs,err1 = DB.open(txn,"log",DB.MDB_CREATE + DB.MDB_INTEGERKEY)
+				local cursor,err = Cursor.open(txn,logs)
+				local key,id,err = Cursor.get(cursor,nil,Cursor.MDB_LAST)
+				self.version = id
+				if not self.version then
+					self.version = 0
+				end
 				logger:info("going to open","buckets",DB.MDB_CREATE)
 				DB.open(txn,"buckets",DB.MDB_DUPSORT + DB.MDB_CREATE)
 				Txn.commit(txn)
