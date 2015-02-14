@@ -292,37 +292,16 @@ function Txn.renew(txn)
 end
 
 function Txn.put(txn,dbi,key,data,flags)
-	local index = ffi.new("MDB_val[1]")
-	if type(key) == "cdata" then
-		index[0].mv_data = ffi.cast("void*",key)
-		index[0].mv_size = ffi.sizeof(key)
-	elseif type(key) == "number" then
-		index[0].mv_data = ffi.cast("void*",ffi.new("unsigned long[1]",key))
-		index[0].mv_size = ffi.sizeof("unsigned long")
-	else
-		index[0].mv_data = ffi.cast("void*",key)
-		index[0].mv_size = #key
-	end
-	local value = ffi.new("MDB_val[1]")
-	value[0].mv_data = ffi.cast("void*",data)
-	value[0].mv_size = #data
+	local index = build_MDB_val(key)
+	local value = build_MDB_val(data)
 	local err = lmdb.mdb_put(txn,dbi,index,value,flags)
 	return MDB.error(err)
 end
 
 function Txn.get(txn,dbi,key,cast)
 	local value = ffi.new("MDB_val[1]")
-	local lookup = ffi.new("MDB_val[1]")
-	if type(key) == "cdata" then
-		lookup[0].mv_data = ffi.cast("void*",key)
-		lookup[0].mv_size = ffi.sizeof(key)
-	elseif type(key) == "number" then
-		lookup[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",key))
-		lookup[0].mv_size = ffi.sizeof("size_t")
-	else
-		lookup[0].mv_data = ffi.cast("void*",key)
-		lookup[0].mv_size = #key
-	end
+
+	local lookup = build_MDB_val(key)
 	local err = lmdb.mdb_get(txn,dbi,lookup,value)
 	local string
 	if err == 0 then
@@ -336,14 +315,10 @@ function Txn.get(txn,dbi,key,cast)
 end
 
 function Txn.del(enx,dbi,key,data)
-	local index = ffi.new("MDB_val[1]")
-	index[0].mv_data = ffi.cast("void*",key)
-	index[0].mv_size = #key
+	local index = build_MDB_val(key)
 	local value
 	if data then
-		value = ffi.new("MDB_val[1]")
-		value[0].mv_data = ffi.cast("void*",data)
-		value[0].mv_size = #data
+		value = build_MDB_val(data)
 	end
 
 	local err = lmdb.mdb_del(env,dbi,index,value)
@@ -418,21 +393,7 @@ function Cursor.close(cursor)
 end
 
 function Cursor.get(cursor,key,op,icast,cast)
-	local index = ffi.new("MDB_val[1]")
-	if type(key) == "cdata" then
-		index[0].mv_data = ffi.cast("void*",key)
-		index[0].mv_size = ffi.sizeof(key)
-	elseif type(key) == "number" then
-		index[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",key))
-		index[0].mv_size = ffi.sizeof("size_t")
-	else
-		index[0].mv_data = ffi.cast("void*",key)
-		if key then
-			index[0].mv_size = #key
-		else
-			index[0].mv_size = 0
-		end
-	end
+	local index = build_MDB_val(key)
 	local value = ffi.new("MDB_val[1]")
 	value[0].mv_data = ffi.cast("void*",nil)
 	value[0].mv_size = 0
@@ -453,6 +414,25 @@ function Cursor.get(cursor,key,op,icast,cast)
 		
 		return index,value,MDB.error(err)
 	end
+end
+
+function build_MDB_val(elem)
+	local value = ffi.new("MDB_val[1]")
+	if type(elem) == "cdata" then
+		value[0].mv_data = ffi.cast("void*",elem)
+		value[0].mv_size = ffi.sizeof(elem)
+	elseif type(elem) == "number" then
+		value[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",elem))
+		value[0].mv_size = ffi.sizeof("size_t")
+	else
+		value[0].mv_data = ffi.cast("void*",elem)
+		if elem then
+			value[0].mv_size = #elem
+		else
+			value[0].mv_size = 0
+		end
+	end
+	return value
 end
 
 p("using Lightning Memory Mapped Database",MDB.version())
