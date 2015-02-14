@@ -293,10 +293,12 @@ end
 
 function Txn.put(txn,dbi,key,data,flags)
 	local index = ffi.new("MDB_val[1]")
-	
-	if type(key) == "number" then
-		index[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",key))
-		index[0].mv_size = ffi.sizeof("size_t")
+	if type(key) == "cdata" then
+		index[0].mv_data = ffi.cast("void*",key)
+		index[0].mv_size = ffi.sizeof(key)
+	elseif type(key) == "number" then
+		index[0].mv_data = ffi.cast("void*",ffi.new("unsigned long[1]",key))
+		index[0].mv_size = ffi.sizeof("unsigned long")
 	else
 		index[0].mv_data = ffi.cast("void*",key)
 		index[0].mv_size = #key
@@ -308,10 +310,13 @@ function Txn.put(txn,dbi,key,data,flags)
 	return MDB.error(err)
 end
 
-function Txn.get(txn,dbi,key)
+function Txn.get(txn,dbi,key,cast)
 	local value = ffi.new("MDB_val[1]")
 	local lookup = ffi.new("MDB_val[1]")
-	if type(key) == "number" then
+	if type(key) == "cdata" then
+		lookup[0].mv_data = ffi.cast("void*",key)
+		lookup[0].mv_size = ffi.sizeof(key)
+	elseif type(key) == "number" then
 		lookup[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",key))
 		lookup[0].mv_size = ffi.sizeof("size_t")
 	else
@@ -321,7 +326,11 @@ function Txn.get(txn,dbi,key)
 	local err = lmdb.mdb_get(txn,dbi,lookup,value)
 	local string
 	if err == 0 then
-		string = ffi.string(value[0].mv_data,value[0].mv_size)
+		if cast then
+			string = ffi.cast(cast,value[0].mv_data)
+		else
+			string = ffi.string(value[0].mv_data,value[0].mv_size)
+		end
 	end
 	return string,MDB.error(err)
 end
@@ -408,13 +417,21 @@ function Cursor.close(cursor)
 	lmdb.mdb_cursor_close(cursor)
 end
 
-function Cursor.get(cursor,key,op)
+function Cursor.get(cursor,key,op,icast,cast)
 	local index = ffi.new("MDB_val[1]")
-	index[0].mv_data = ffi.cast("void*",key)
-	if key then
-		index[0].mv_size = #key
+	if type(key) == "cdata" then
+		index[0].mv_data = ffi.cast("void*",key)
+		index[0].mv_size = ffi.sizeof(key)
+	elseif type(key) == "number" then
+		index[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",key))
+		index[0].mv_size = ffi.sizeof("size_t")
 	else
-		index[0].mv_size = 0
+		index[0].mv_data = ffi.cast("void*",key)
+		if key then
+			index[0].mv_size = #key
+		else
+			index[0].mv_size = 0
+		end
 	end
 	local value = ffi.new("MDB_val[1]")
 	value[0].mv_data = ffi.cast("void*",nil)
@@ -423,8 +440,17 @@ function Cursor.get(cursor,key,op)
 	if not (err == 0) then
 		return nil,nil,MDB.error(err)
 	else
-		index = ffi.string(index[0].mv_data,index[0].mv_size)
-		value = ffi.string(value[0].mv_data,value[0].mv_size)
+		if icast then
+			index = ffi.cast(icast,index[0].mv_data)
+		else
+			index = ffi.string(index[0].mv_data,index[0].mv_size)
+		end
+		if cast then
+			value = ffi.cast(icast,value[0].mv_data)
+		else
+			value = ffi.string(value[0].mv_data,value[0].mv_size)
+		end
+		
 		return index,value,MDB.error(err)
 	end
 end

@@ -121,6 +121,7 @@ function Plan:next_plan()
 				end
 			
 				-- we ask the topology what data points are needed
+				logger:info(topology)
 				local add,remove = topology.script(data,idx,alive)
 				logger:debug("toplogy returned",self.system.type,add,remove)
 				local new_plan = {add = add,remove = remove}

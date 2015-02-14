@@ -27,7 +27,6 @@ require('./store/storage')(Store)
 function Store:initialize(path,id,version,ip,port,api)
 	self.api = api
 	self.id = id
-	self.version = version
 	self.scripts = {}
 	self.ip = ip
 	self.port = port
@@ -124,32 +123,39 @@ function Store:delete(b_id,id,last_known)
 	end
 end
 
-function Store:_store(b_id,id,data,last_known,sync,broadcast)
-	local key = b_id .. ":" .. id
+function Store:start()
 	local txn,err = Env.txn_begin(self.env,nil,0)
 	if err then
-		logger:info("can't begin txn",key)
-		return nil,err
+		return nil,nil,nil,nil,err
 	end
 
 	local objects,err = DB.open(txn,"objects",0)
 	if err then
-		logger:info("can't open 'objects' DB",key)
 		Txn.abort(txn)
-		return nil,err
+		return nil,nil,nil,nil,err
 	end
 
 	local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
 	if err then
-		logger:info("can't open 'buckets' DB",key)
 		Txn.abort(txn)
-		return nil,err
+		return nil,nil,nil,nil,err
 	end
 
 	local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
 	if err then
-		logger:info("can't open 'logs' DB",key)
 		Txn.abort(txn)
+		return nil,nil,nil,nil,err
+	end
+
+	return txn,objects,buckets,logs
+end
+
+function Store:_store(b_id,id,data,last_known,sync,broadcast)
+	local key = b_id .. ":" .. id
+
+	local txn,objects,buckets,logs,err = self:start()
+	if err then
+		logger:warning("unable to store data",err)
 		return nil,err
 	end
 
@@ -177,9 +183,18 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 
 	local encoded = JSON.stringify(data)
 	local err = Txn.put(txn,objects,key,encoded,0)
-
 	if err then
 		logger:error("unable to add value to 'objects' DB",key,err)
+		Txn.abort(txn)
+		return nil,err
+	end
+
+	local op = JSON.stringify({action = "store",data = data})
+	self.version = self.version + 1
+	local err = Txn.put(txn,logs,self.version,op,0)
+
+	if err then
+		logger:error("unable to add to commit log",key,err)
 		Txn.abort(txn)
 		return nil,err
 	end
@@ -207,31 +222,13 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 end
 
 function Store:_delete(b_id,id,last_known,sync,broadcast)
-	local txn,err = Env.txn_begin(self.env,nil,0)
+	
+	local txn,objects,buckets,logs,err = self:start()
 	if err then
+		logger:warning("unable to store data",err)
 		return nil,err
 	end
 
-	local objects,err = DB.open(txn,"objects",0)
-	if err then
-		logger:info("can't open 'objects' DB")
-		Txn.abort(txn)
-		return nil,err
-	end
-
-	local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
-	if err then
-		logger:info("can't open 'objects' DB")
-		Txn.abort(txn)
-		return nil,err
-	end
-
-	local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
-	if err then
-		logger:info("can't open 'logs' DB")
-		Txn.abort(txn)
-		return nil,err
-	end
 	local json,err = Txn.get(txn,objects,key)
 	-- there has got to be a better way to do this.
 	local obj = JSON.parse(json)
@@ -240,7 +237,28 @@ function Store:_delete(b_id,id,last_known,sync,broadcast)
 	end
 
 	local err = Txn.delete(txn,objects,key)
+	if err then
+		logger:error("unable to delete object",key,err)
+		Txn.abort(txn)
+		return nil,err
+	end
+
 	local err = Txn.delete(txn,buckets,b_id,id)
+	if err then
+		logger:error("unable to delete objcet key",key,err)
+		Txn.abort(txn)
+		return nil,err
+	end
+
+	local op = JSON.stringify({action = "delete",data = {bucket = b_id,id = id}})
+	self.version = self.version + 1
+	local err = Txn.put(txn,logs,self.version,op,0)
+
+	if err then
+		logger:error("unable to add to commit log",key,err)
+		Txn.abort(txn)
+		return nil,err
+	end
 
 	-- commit all changes
 	err = Txn.commit(txn)
@@ -274,7 +292,7 @@ function Store:compile(data,bucket,id)
 	local fn,err = self:build(data,script,env,bucket,id)
 	if err then
 		logger:error("script failed to compile",err)
-		return err
+		return nil,err
 	elseif fn then
 		return fn()
 	end
