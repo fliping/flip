@@ -10,6 +10,7 @@
 ---------------------------------------------------------------------
 
 local fs = require('fs')
+local os = require('os')
 local JSON = require('json')
 local math = require('math')
 local hrtime = require('uv').Process.hrtime

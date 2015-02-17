@@ -17,6 +17,14 @@ local logger = require('./logger')
 
 local Plan = Emitter:extend()
 
+local table_sort = function(a,b)
+	if type(a) == 'table' and type(b) == 'table' then
+		return a.id > b.id
+	else
+		return a > b
+	end
+end
+
 function Plan:initialize(system,sys_name,flip,store)
 	self.store = store
 	self.sys_name = sys_name
@@ -161,7 +169,7 @@ function Plan:compute(new_plan)
 	
 	-- we order the array to make the comparison easier
 	local new_add = new_plan.add
-	table.sort(new_add)
+	table.sort(new_add,table_sort)
 
 	local add = {}
 	local remove = {}
@@ -267,7 +275,7 @@ function Plan:run()
 	end
 
 	self.plan = newest_plan
-	table.sort(self.plan)
+	table.sort(self.plan,table_sort)
 	
 	local queue = self.queue
 	self.queue = true

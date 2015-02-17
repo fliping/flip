@@ -11,10 +11,11 @@
 
 -- when a new master is chosen this script is called.
 return function(members,cb)
-	local member = members[1]
-	if (store.id == member.id) then
-		store:promote_to_master(cb)
-	else
-		store:slave_of(member.http_ip,member.http_port,cb)
+	for idx,member in pairs(members) do
+
+		if not (store.id == member.id) then
+			store:begin_sync(member.http_ip,member.http_port)
+		end
 	end
+	cb()
 end

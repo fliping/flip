@@ -32,14 +32,10 @@ function Store:initialize(path,id,version,ip,port,api)
 	self.ip = ip
 	self.port = port
 	self.is_master = true
-	self.connection = nil
+	self.connections = {}
 	self.master = {}
 	self.master_replication = {}
 	self.db_path = path
-end
-
-function Store:upto_date()
-	return self.is_master or not self.connection
 end
 
 function Store:index(b_id,idx)
@@ -347,9 +343,7 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 end
 
 function  Store:replicate(operation,op_timestamp,cb,total)
-	logger:info("going to replicate",operation)
 	self:emit('sync',operation)
-	logger:info("synced",operation)
 	local complete = function(completed)
 		if cb then
 			cb(completed,nil)
@@ -375,13 +369,17 @@ function  Store:replicate(operation,op_timestamp,cb,total)
 	end
 
 	local current = 1
-	for _idx,connection in pairs(self.master_replication) do
-		connection:send(op,function()
-			current = current + 1
-			cb(current/total,nil)
-		end)
-	end
-	complete(current/total)
+	
+	-- this needs to be implemented eventually
+
+	-- for _idx,connection in pairs(self.master_replication) do
+	-- 	connection:send(op,function()
+	-- 		current = current + 1
+	-- 		cb(current/total,nil)
+	-- 	end)
+	-- end
+	-- complete(current/total)
+	complete(1)
 end
 
 function Store:compile(data,bucket,id)

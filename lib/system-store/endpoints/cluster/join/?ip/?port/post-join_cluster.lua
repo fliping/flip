@@ -10,7 +10,7 @@
 ---------------------------------------------------------------------
 
 return function(req,res)
-	store:slave_of(req.env.ip,req.env.port,function(err)
+	store:begin_sync(req.env.ip,req.env.port,function(err)
 		if err then
 			local code = error_code(err)
 			res:writeHead(code,{})
