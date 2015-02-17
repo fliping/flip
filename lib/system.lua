@@ -106,6 +106,7 @@ function System:enable()
 		end
 
 		self.store:on("systems",function(kind,id,system_config) self:check_system(kind,id,system_config) end)
+		self.store:on("refresh",function() logger:info("we need to refresh all systems") end)
 
 		-- when this process shutsdown, we want to remove all data
 		-- that it is responsible for, but only if requested

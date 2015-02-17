@@ -45,7 +45,7 @@ function main()
 			end
 		elseif result and result.cli and result.cli[command] then
 			logger:debug("running script",result.cli[command])
-			request('get','store',system,result.cli[command],nil,{},function(result,err)
+			request('get','store',system .. '-scripts',result.cli[command],nil,{},function(result,err)
 				if err then
 					logger:error("command was not found",system,command)
 					process.exit(1)
@@ -124,12 +124,17 @@ function bind_store(batton)
 			batton.call = function(cb) request('post','store',bucket,id,data,{["last-known-update"]=last_known},cb) end
 			coroutine.yield()
 			return unpack(batton.respose)
+		end
+		,request = function(self,method,prefix,bucket,id,data,headers)
+			logger:debug("making request",method,prefix,bucket,id,data,headers)
+			batton.call = function(cb) request(method,prefix,bucket,id,data,headers,cb) end
+			coroutine.yield()
+			return unpack(batton.respose)
 		end}
 end
 
 
 function request(method,prefix,bucket,id,data,headers,cb)
-	logger:debug("request",method,prefix,bucket,id,data,cb)
 	local path
 	if id then
 		path = "/" .. prefix .. "/" .. bucket .. "/" .. id

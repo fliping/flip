@@ -171,7 +171,7 @@ end
 
 function Flip:find_member(key)
 	if type(key) == "number" then
-		return self.members[inverse_map[key]]
+		return self.members[self.inverse_map[key]]
 	else
 		-- server =  self.store:fetch("servers",key)
 		return self.members[key]
@@ -179,11 +179,15 @@ function Flip:find_member(key)
 end
 
 function Flip:get_idx()
-	local object,err = self.store:fetch("servers",self.config.id)
-	if err and not (err == "old data") then
-		logger:warning("unable to find my idx",err)
-		process.exit(1)
+	local servers,err = self.store:fetch("servers")
+	table.sort(servers,function(a,b) return a.created_at > b.created_at end)
+	for idx,object in pairs(servers) do
+		if object.id == self.config.id then
+			return idx
+		end
 	end
+	logger:warning("unable to find my idx",err)
+	process.exit(1)
 	return object.idx
 end
 

@@ -25,9 +25,8 @@ return function(req,res)
 		end)
 
 		if success then
-			local last_known = req.headers["last-known-update"] or data.last_updated
 			
-			local object,err = store:store(req.env.bucket,req.env.id,data,last_known)
+			local object,err = store:store(req.env.bucket,req.env.id,data)
 			if object then
 				-- we can't stringify a function
 				object.script = nil

@@ -13,10 +13,9 @@ return function(req,res)
 	if not req.headers["last-known-update"] then
 		req.headers["last-known-update"] = 0
 	end
-	local last_known = 0 + req.headers["last-known-update"]
-	logger:info("delete",req.env.bucket,req.env.id,last_known)
+	logger:info("delete",req.env.bucket,req.env.id)
 	
-	local updated,err = store:delete(req.env.bucket,req.env.id,last_known)
+	local updated,err = store:delete(req.env.bucket,req.env.id)
 	if err then
 		local code = error_code(err)
 		res:writeHead(code,{})

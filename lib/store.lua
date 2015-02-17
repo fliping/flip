@@ -123,7 +123,7 @@ end
 
 function Store:store(b_id,id,data,cb)
 	if self.is_master then
-		return self:_store(b_id,id,data,false,true,cb)
+		return self:_store(b_id,id,data,false,true,nil,cb)
 	else
 		return {master = {ip = self.master.ip, port = self.master.port}},"read only slave"
 	end
@@ -131,14 +131,14 @@ end
 
 function Store:delete(b_id,id,cb)
 	if self.is_master then
-		return self:_delete(b_id,id,false,true,cb)
+		return self:_delete(b_id,id,false,true,nil,cb)
 	else
 		return {master = {ip = self.master.ip, port = self.master.port}},"read only slave"
 	end
 end
 
-function Store:start()
-	local txn,err = Env.txn_begin(self.env,nil,0)
+function Store:start(parent)
+	local txn,err = Env.txn_begin(self.env,parent,0)
 	if err then
 		return nil,nil,nil,nil,err
 	end
@@ -164,16 +164,18 @@ function Store:start()
 	return txn,objects,buckets,logs
 end
 
-function Store:_store(b_id,id,data,sync,broadcast,cb)
+function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	local key = b_id .. ":" .. id
 
-	local txn,objects,buckets,logs,err = self:start()
+	local txn,objects,buckets,logs,err = self:start(parent)
 	if err then
 		logger:warning("unable to store data",err)
 		return nil,err
 	end
 
-	if not sync then
+	if sync then
+		Txn.put(txn,buckets,b_id,id,Txn.MDB_NODUPDATA)
+	else
 		local json,err = Txn.get(txn,objects,key)
 		if err then
 			err = Txn.put(txn,buckets,b_id,id,Txn.MDB_NODUPDATA)
@@ -203,15 +205,19 @@ function Store:_store(b_id,id,data,sync,broadcast,cb)
 		return nil,err
 	end
 
-	local op = JSON.stringify({action = "store",data = data})
-	local op_timestamp = hrtime() * 100000
-	self.version = op_timestamp
-	local err = Txn.put(txn,logs,self.version,op,0)
+	local op
+	local op_timestamp
+	if not sync then
+		op = JSON.stringify({action = "store",data = data})
+		 op_timestamp = hrtime() * 100000
+		self.version = op_timestamp
+		local err = Txn.put(txn,logs,self.version,op,0)
 
-	if err then
-		logger:error("unable to add to commit log",key,err)
-		Txn.abort(txn)
-		return nil,err
+		if err then
+			logger:error("unable to add to commit log",key,err)
+			Txn.abort(txn)
+			return nil,err
+		end
 	end
 
 	-- commit all changes
@@ -233,12 +239,15 @@ function Store:_store(b_id,id,data,sync,broadcast,cb)
 	if broadcast and updated then
 		self:emit(b_id,"store",id,data)
 	end
-	self:replicate(op,op_timestamp,cb,#self.master_replication + 1)
+	
+	if not sync then
+		self:replicate(op,op_timestamp,cb,#self.master_replication + 1)
+	end
 end
 
-function Store:_delete(b_id,id,sync,broadcast,cb)
+function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 	
-	local txn,objects,buckets,logs,err = self:start()
+	local txn,objects,buckets,logs,err = self:start(parent)
 	if err then
 		logger:warning("unable to delete data",err)
 		return nil,err
@@ -265,15 +274,19 @@ function Store:_delete(b_id,id,sync,broadcast,cb)
 		return nil,err
 	end
 
-	local op = JSON.stringify({action = "delete",data = {bucket = b_id,id = id}})
-	local op_timestamp = hrtime() * 100000
-	self.version = op_timestamp
-	local err = Txn.put(txn,logs,self.version,op,0)
+	local op
+	local op_timestamp
+	if not sync then
+		op = JSON.stringify({action = "delete",data = {bucket = b_id,id = id}})
+		 op_timestamp = hrtime() * 100000
+		self.version = op_timestamp
+		local err = Txn.put(txn,logs,self.version,op,0)
 
-	if err then
-		logger:error("unable to add to commit log",key,err)
-		Txn.abort(txn)
-		return nil,err
+		if err then
+			logger:error("unable to add to commit log",key,err)
+			Txn.abort(txn)
+			return nil,err
+		end
 	end
 
 	-- commit all changes
@@ -288,11 +301,16 @@ function Store:_delete(b_id,id,sync,broadcast,cb)
 	if broadcast then
 		self:emit(b_id,"delete",id)
 	end
-	self:replicate(op,op_timestamp,cb,#self.master_replication + 1)
+	
+	if not sync then
+		self:replicate(op,op_timestamp,cb,#self.master_replication + 1)
+	end
 end
 
 function  Store:replicate(operation,op_timestamp,cb,total)
+	logger:info("going to replicate",operation)
 	self:emit('sync',operation)
+	logger:info("synced",operation)
 	local complete = function(completed)
 		if cb then
 			cb(completed,nil)
@@ -324,83 +342,7 @@ function  Store:replicate(operation,op_timestamp,cb,total)
 			cb(current/total,nil)
 		end)
 	end
-	logger:info("going to replicate",op)
 	complete(current/total)
-end
-
-function Store:sync(version)
-	local ops = {}
-	local synced = false
-	local sync = Emitter:new()
-	version = 0 + version
-	timer.setTimeout(0, function ()
-	
-		local txn,err = Env.txn_begin(self.env,nil,0)
-		if err then
-			logger:error("unable to begin txn to clear log")
-			return
-		end
-
-		logger:info("sync transaction begun",version)
-
-		local logs,err = DB.open(txn,"logs",DB.MDB_DUPSORT)
-		if err then
-			logger:info("unable to open 'logs' DB",err)
-			return nil,err
-		end
-		local cursor,err = Cursor.open(txn,logs)
-		if err then
-			logger:info("unable to create cursor",err)
-			return nil,err
-		end
-
-		logger:info("log cursor open")
-
-		local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"long")
-		logger:info("comparing last known logs",key,version)
-		if not (key == version) then
-			logger:info("performing full sync")
-			local objects,err = DB.open(txn,"objects",0)
-			if err then
-				logger:info("unable to open 'objects' DB",err)
-				return nil,err
-			end
-
-			local obj_cursor,err = Cursor.open(txn,objects)
-			if err then
-				logger:info("unable to create cursor",err)
-				return nil,err
-			end
-			local id,json,err = Cursor.get(obj_cursor,version,Cursor.MDB_FIRST)
-			while json do
-				logger:info("syncing",json)
-				sync:emit("event",json)
-				id,json,err = Cursor.get(obj_cursor,id,Cursor.MDB_NEXT)
-			end	
-			Cursor.close(obj_cursor)
-		else
-			logger:info("performing partial sync")
-			while key do
-				logger:info("syncing",op)
-				sync:emit("event",op)
-				key,op,err = Cursor.get(cursor,key,Cursor.MDB_NEXT)
-			end
-		end
-		sync:emit(event,"true")
-		Cursor.close(cursor)
-		Txn.abort(txn)
-		local synced = true
-	end)
-
-	self:on(sync,function(op)
-		if synced then
-			logger:info("tailing",op)
-			sync:emit("event",op)
-		else
-			ops[#ops + 1] = op
-		end
-	end)
-	return sync
 end
 
 function Store:compile(data,bucket,id)

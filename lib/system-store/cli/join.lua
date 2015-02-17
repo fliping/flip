@@ -13,4 +13,6 @@
 
 return function(ip,port)
 	logger:info("I am trying to join the cluster",ip,port)
+	local err,body = store:request('post','cluster/join',ip,port,nil,nil)
+	logger:info(err,body)
 end
