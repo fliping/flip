@@ -89,13 +89,11 @@ function System:enable()
 	if not self.enabled then
 		self.enabled = true
 		local systems,err = self.store:fetch("systems")
-		
 		if err then
 			logger:info("no systems present in cluster",err)
 			systems = {}
 		end
 
-		logger:info(systems)
 		for _idx,system_config in pairs(systems) do
 			sys_id = system_config.id
 			self:init_system(system_config)

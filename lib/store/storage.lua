@@ -11,6 +11,7 @@
 local logger = require('../logger')
 local JSON = require('json')
 local fs = require('fs')
+local hrtime = require('uv').Process.hrtime
 local lmmdb = require('../lmmdb')
 Env = lmmdb.Env
 Txn = lmmdb.Txn
@@ -20,46 +21,39 @@ DB = lmmdb.DB
 return function(Store)
 
 	function Store:load_from_disk(cb)
-		fs.mkdir(self.db_path, "0755", function (is_new)
-			if is_new and not (is_new.code == "EEXIST") then
-				cb(false,is_new)
-			else
-				local env,err = Env.create()
-				Env.set_maxdbs(env,3)
-				if err then 
-					logger:fatal('unable to create store',err)
-					process.exit(1)
-				end
-				err = Env.open(env,self.db_path,0,0755)
-				if err then 
-					logger:fatal('unable to open store',err)
-					process.exit(1)
-				end
-				self.env = env
-				local txn = Env.txn_begin(env,nil,0)
-				logger:info("going to open","objects",DB.MDB_CREATE)
-				DB.open(txn,"objects",DB.MDB_CREATE)
-				logger:info("going to open","logs",DB.MDB_CREATE)
-				local logs,err1 = DB.open(txn,"logs",DB.MDB_CREATE + DB.MDB_INTEGERKEY)
-				logger:info("logs db",logs,err1)
-				local cursor,err = Cursor.open(txn,logs)
-				local key,_op,err = Cursor.get(cursor,nil,Cursor.MDB_LAST,"unsigned long")
-				logger:info("last log",key,_op,err)
-				self.version = key
-				if not self.version then
-					self.version = 0
-				end
-				logger:info("going to open","buckets",DB.MDB_CREATE)
-				DB.open(txn,"buckets",DB.MDB_DUPSORT + DB.MDB_CREATE)
-				logger:info(Txn.commit(txn))
-				cb(not (is_new == nil),err)
+		fs.stat(self.db_path,function(_,exists)
+			local env,err = Env.create()
+			Env.set_maxdbs(env,3)
+			if err then 
+				logger:fatal('unable to create store',err)
+				process.exit(1)
 			end
+			err = Env.open(env,self.db_path,Env.MDB_NOSUBDIR,0755)
+			if err then 
+				logger:fatal('unable to open store',err)
+				process.exit(1)
+			end
+			self.env = env
+			local txn = Env.txn_begin(env,nil,0)
+			DB.open(txn,"objects",DB.MDB_CREATE)
+			local logs,err1 = DB.open(txn,"logs",DB.MDB_CREATE + DB.MDB_INTEGERKEY)
+			local cursor = Cursor.open(txn,logs)
+			local key,_op = Cursor.get(cursor,nil,Cursor.MDB_LAST,"unsigned long*")
+			if key then
+				logger:info("last operation commited",key[0])
+				self.version = key[0]
+			else
+				logger:info("new database was opened")
+				self.version = hrtime() * 100000
+			end
+			DB.open(txn,"buckets",DB.MDB_DUPSORT + DB.MDB_CREATE)
+			Txn.commit(txn)
+			cb(not exists,err)
 		end)
 	end
 
 	function Store:open(cb)
 		self:load_from_disk(function(need_bootstrap,err)
-			logger:info(need_bootstrap,err)
 			if need_bootstrap then
 				logger:info("bootstrapping store")
 

@@ -10,7 +10,7 @@
 ---------------------------------------------------------------------
 
 return function(req,res)
-	local sync,err = store:to_json(req.env.version)
+	local sync,err = store:sync(req.env.version)
 	if err then
 		local code = error_code(err)
 		res:writeHead(code,{})
@@ -18,7 +18,7 @@ return function(req,res)
 	else
 		res:writeHead(200,{})
 		sync:on('event',function(object)
-			res:write(JSON.stringify(object))
+			res:write(object)
 		end)
 	end
 end

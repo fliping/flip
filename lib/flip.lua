@@ -56,7 +56,7 @@ function Flip:start()
 			-- if I'm not a member of the cluster, lets set that up.
 			
 			local member,err = self.store:fetch("servers",self.config.id)
-			logger:info("found member",member,err)
+			logger:debug("found member",member,err)
 			if err == "MDB_NOTFOUND: No matching key/data pair found" then
 				logger:info("bootstrapping node into single cluster")
 				me = 
@@ -77,7 +77,7 @@ function Flip:start()
 
 			local members = self.store:fetch("servers")
 			-- load all members into the monitor
-			logger:info("bootstrapping members",members)
+			logger:debug("bootstrapping members",members)
 			for _idx,member in pairs(members) do
 				self:process_server_update("store",member.id,member)
 			end
@@ -135,7 +135,7 @@ end
 -- as member data changes, systems added/removed etc, this function
 -- will be passed in the changes.
 function Flip:process_server_update(kind,id,data)
-	logger:info("server update",kind,id,data)
+	logger:debug("server update",kind,id,data)
 	if kind == "store" then
 		local member = self.members[id]
 		if member then
@@ -170,7 +170,6 @@ function Flip:process_server_update(kind,id,data)
 end
 
 function Flip:find_member(key)
-	logger:info("finding",key,self.members)
 	if type(key) == "number" then
 		return self.members[inverse_map[key]]
 	else

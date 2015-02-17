@@ -121,7 +121,6 @@ function Plan:next_plan()
 				end
 			
 				-- we ask the topology what data points are needed
-				logger:info(topology)
 				local add,remove = topology.script(data,idx,alive)
 				logger:debug("toplogy returned",self.system.type,add,remove)
 				local new_plan = {add = add,remove = remove}
@@ -332,9 +331,9 @@ function Plan:_run(state,data,cb)
 				end)
 			end
 		else
-			local script,err = self.store:fetch(self.sys_name,cmd)
+			local script,err = self.store:fetch(self.sys_name .. '-scripts',cmd)
 			if err and not (err == "old data") then
-				logger:warning("unable to find script in store",self.sys_name,cmd)
+				logger:warning("unable to find script in store",self.sys_name .. '-scripts',cmd)
 				cb()
 			else
 				logger:info("running ",self.sys_name,cmd)

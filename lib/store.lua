@@ -12,6 +12,7 @@
 local Emitter = require('core').Emitter
 local logger = require('./logger')
 local JSON = require('json')
+local timer = require('timer')
 local table = require('table')
 local hrtime = require('uv').Process.hrtime
 local lmmdb = require("./lmmdb")
@@ -33,6 +34,7 @@ function Store:initialize(path,id,version,ip,port,api)
 	self.is_master = true
 	self.connection = nil
 	self.master = {}
+	self.master_replication = {}
 	self.db_path = path
 end
 
@@ -63,6 +65,10 @@ function Store:fetch(b_id,id,cb)
 		else
 			json = JSON.parse(json)
 			json.script = self.scripts[b_id .. ":" .. id]
+			if json["$script"] and not json.script then
+				json.script = self:compile(json,b_id,id)
+				self.scripts[b_id .. ":" .. id] = json.script
+			end
 			return json
 		end
 	else
@@ -84,6 +90,10 @@ function Store:fetch(b_id,id,cb)
 				json,err = Txn.get(txn,objects, b_id .. ":" .. id)
 				json = JSON.parse(json)
 				json.script = self.scripts[b_id .. ":" .. id]
+				if json["$script"] and not json.script then
+					json.script = self:compile(json,b_id,id)
+					self.scripts[b_id .. ":" .. id] = json.script
+				end
 				cb(key,json)
 				key,id,err = Cursor.get(cursor,key,Cursor.MDB_NEXT_DUP)
 			end
@@ -95,6 +105,10 @@ function Store:fetch(b_id,id,cb)
 				local json,err = Txn.get(txn,objects, b_id .. ":" .. id)
 				json = JSON.parse(json)
 				json.script = self.scripts[b_id .. ":" .. id]
+				if json["$script"] and not json.script then
+					json.script = self:compile(json,b_id,id)
+					self.scripts[b_id .. ":" .. id] = json.script
+				end
 				acc[#acc + 1] = json
 				key,id,err = Cursor.get(cursor,key,Cursor.MDB_NEXT_DUP)
 			end
@@ -107,17 +121,17 @@ function Store:fetch(b_id,id,cb)
 
 end
 
-function Store:store(b_id,id,data,last_known)
+function Store:store(b_id,id,data,cb)
 	if self.is_master then
-		return self:_store(b_id,id,data,last_known,false,true)
+		return self:_store(b_id,id,data,false,true,cb)
 	else
 		return {master = {ip = self.master.ip, port = self.master.port}},"read only slave"
 	end
 end
 
-function Store:delete(b_id,id,last_known)
+function Store:delete(b_id,id,cb)
 	if self.is_master then
-		return self:_delete(b_id,id,last_known,false,true)
+		return self:_delete(b_id,id,false,true,cb)
 	else
 		return {master = {ip = self.master.ip, port = self.master.port}},"read only slave"
 	end
@@ -150,7 +164,7 @@ function Store:start()
 	return txn,objects,buckets,logs
 end
 
-function Store:_store(b_id,id,data,last_known,sync,broadcast)
+function Store:_store(b_id,id,data,sync,broadcast,cb)
 	local key = b_id .. ":" .. id
 
 	local txn,objects,buckets,logs,err = self:start()
@@ -190,7 +204,8 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 	end
 
 	local op = JSON.stringify({action = "store",data = data})
-	self.version = self.version + 1
+	local op_timestamp = hrtime() * 100000
+	self.version = op_timestamp
 	local err = Txn.put(txn,logs,self.version,op,0)
 
 	if err then
@@ -217,41 +232,42 @@ function Store:_store(b_id,id,data,last_known,sync,broadcast)
 	local updated = true
 	if broadcast and updated then
 		self:emit(b_id,"store",id,data)
-		self:emit("sync",b_id,"store",id,data)
 	end
+	self:replicate(op,op_timestamp,cb,#self.master_replication + 1)
 end
 
-function Store:_delete(b_id,id,last_known,sync,broadcast)
+function Store:_delete(b_id,id,sync,broadcast,cb)
 	
 	local txn,objects,buckets,logs,err = self:start()
 	if err then
-		logger:warning("unable to store data",err)
+		logger:warning("unable to delete data",err)
 		return nil,err
 	end
 
 	local json,err = Txn.get(txn,objects,key)
 	-- there has got to be a better way to do this.
-	local obj = JSON.parse(json)
-	if not obj then
-		return
+	if not json then
+		return nil,err
 	end
+	local obj = JSON.parse(json)
 
-	local err = Txn.delete(txn,objects,key)
+	local err = Txn.del(txn,objects,key)
 	if err then
 		logger:error("unable to delete object",key,err)
 		Txn.abort(txn)
 		return nil,err
 	end
 
-	local err = Txn.delete(txn,buckets,b_id,id)
+	local err = Txn.del(txn,buckets,b_id,id)
 	if err then
-		logger:error("unable to delete objcet key",key,err)
+		logger:error("unable to delete object key",key,err)
 		Txn.abort(txn)
 		return nil,err
 	end
 
 	local op = JSON.stringify({action = "delete",data = {bucket = b_id,id = id}})
-	self.version = self.version + 1
+	local op_timestamp = hrtime() * 100000
+	self.version = op_timestamp
 	local err = Txn.put(txn,logs,self.version,op,0)
 
 	if err then
@@ -271,8 +287,120 @@ function Store:_delete(b_id,id,last_known,sync,broadcast)
 
 	if broadcast then
 		self:emit(b_id,"delete",id)
-		self:emit("sync",b_id,"delete",id,object)
 	end
+	self:replicate(op,op_timestamp,cb,#self.master_replication + 1)
+end
+
+function  Store:replicate(operation,op_timestamp,cb,total)
+	self:emit('sync',operation)
+	local complete = function(completed)
+		if cb then
+			cb(completed,nil)
+		end
+		if completed == 1 then
+			local txn,err = Env.txn_begin(self.env,nil,0)
+			if err then
+				logger:error("unable to begin txn to clear log")
+				return
+			end
+			local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
+			if err then
+				Txn.abort(txn)
+				logger:error("unable to open logs DB for cleaning")
+				return
+			end
+			Txn.del(txn,logs,op_timestamp)
+			err = Txn.commit(txn)
+			if err then
+				logger:error("unable to open clean logs DB")
+			end
+		end
+	end
+
+	local current = 1
+	for _idx,connection in pairs(self.master_replication) do
+		connection:send(op,function()
+			current = current + 1
+			cb(current/total,nil)
+		end)
+	end
+	logger:info("going to replicate",op)
+	complete(current/total)
+end
+
+function Store:sync(version)
+	local ops = {}
+	local synced = false
+	local sync = Emitter:new()
+	version = 0 + version
+	timer.setTimeout(0, function ()
+	
+		local txn,err = Env.txn_begin(self.env,nil,0)
+		if err then
+			logger:error("unable to begin txn to clear log")
+			return
+		end
+
+		logger:info("sync transaction begun",version)
+
+		local logs,err = DB.open(txn,"logs",DB.MDB_DUPSORT)
+		if err then
+			logger:info("unable to open 'logs' DB",err)
+			return nil,err
+		end
+		local cursor,err = Cursor.open(txn,logs)
+		if err then
+			logger:info("unable to create cursor",err)
+			return nil,err
+		end
+
+		logger:info("log cursor open")
+
+		local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"long")
+		logger:info("comparing last known logs",key,version)
+		if not (key == version) then
+			logger:info("performing full sync")
+			local objects,err = DB.open(txn,"objects",0)
+			if err then
+				logger:info("unable to open 'objects' DB",err)
+				return nil,err
+			end
+
+			local obj_cursor,err = Cursor.open(txn,objects)
+			if err then
+				logger:info("unable to create cursor",err)
+				return nil,err
+			end
+			local id,json,err = Cursor.get(obj_cursor,version,Cursor.MDB_FIRST)
+			while json do
+				logger:info("syncing",json)
+				sync:emit("event",json)
+				id,json,err = Cursor.get(obj_cursor,id,Cursor.MDB_NEXT)
+			end	
+			Cursor.close(obj_cursor)
+		else
+			logger:info("performing partial sync")
+			while key do
+				logger:info("syncing",op)
+				sync:emit("event",op)
+				key,op,err = Cursor.get(cursor,key,Cursor.MDB_NEXT)
+			end
+		end
+		sync:emit(event,"true")
+		Cursor.close(cursor)
+		Txn.abort(txn)
+		local synced = true
+	end)
+
+	self:on(sync,function(op)
+		if synced then
+			logger:info("tailing",op)
+			sync:emit("event",op)
+		else
+			ops[#ops + 1] = op
+		end
+	end)
+	return sync
 end
 
 function Store:compile(data,bucket,id)

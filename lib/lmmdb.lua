@@ -35,7 +35,18 @@ function MDB.error(err)
 	return ffi.string(res)
 end
 
-local Env = {}
+local Env = 
+	{MDB_FIXEDMAP   = 0x01
+	,MDB_NOSUBDIR   = 0x4000
+	,MDB_NOSYNC     = 0x10000
+	,MDB_RDONLY     = 0x20000
+	,MDB_NOMETASYNC = 0x40000
+	,MDB_WRITEMAP   = 0x80000
+	,MDB_MAPASYNC   = 0x100000
+	,MDB_NOTLS      = 0x200000
+	,MDB_NOLOCK     = 0x400000
+	,MDB_NORDAHEAD  = 0x800000
+	,MDB_NOMEMINIT  = 0x1000000}
 
 ffi.cdef[[
 typedef void* MDB_env;
@@ -305,11 +316,7 @@ function Txn.get(txn,dbi,key,cast)
 	local err = lmdb.mdb_get(txn,dbi,lookup,value)
 	local string
 	if err == 0 then
-		if cast then
-			string = ffi.cast(cast,value[0].mv_data)
-		else
-			string = ffi.string(value[0].mv_data,value[0].mv_size)
-		end
+		string = build_return(value,cast)
 	end
 	return string,MDB.error(err)
 end
@@ -401,18 +408,20 @@ function Cursor.get(cursor,key,op,icast,cast)
 	if not (err == 0) then
 		return nil,nil,MDB.error(err)
 	else
-		if icast then
-			index = ffi.cast(icast,index[0].mv_data)
-		else
-			index = ffi.string(index[0].mv_data,index[0].mv_size)
-		end
-		if cast then
-			value = ffi.cast(icast,value[0].mv_data)
-		else
-			value = ffi.string(value[0].mv_data,value[0].mv_size)
-		end
-		
+		index = build_return(index,icast)
+		value = build_return(value,cast)
 		return index,value,MDB.error(err)
+	end
+end
+
+function build_return(value,cast)
+	if cast then
+		if not (ffi.sizeof(cast) == value[0].mv_size) then
+			p("cast looses precision",cast,ffi.sizeof(cast),value[0].mv_size)
+		end
+		return ffi.cast(cast,value[0].mv_data)
+	elseif value then
+		return ffi.string(value[0].mv_data,value[0].mv_size)
 	end
 end
 
@@ -422,8 +431,8 @@ function build_MDB_val(elem)
 		value[0].mv_data = ffi.cast("void*",elem)
 		value[0].mv_size = ffi.sizeof(elem)
 	elseif type(elem) == "number" then
-		value[0].mv_data = ffi.cast("void*",ffi.new("unsigned int[1]",elem))
-		value[0].mv_size = ffi.sizeof("size_t")
+		value[0].mv_data = ffi.cast("void*",ffi.new("long[1]",elem))
+		value[0].mv_size = ffi.sizeof("long")
 	else
 		value[0].mv_data = ffi.cast("void*",elem)
 		if elem then
