@@ -171,7 +171,10 @@ end
 
 function Flip:find_member(key)
 	if type(key) == "number" then
-		return self.members[self.inverse_map[key]]
+		local id = self.store:index("servers",key)
+		if id then
+			return self.members[id]
+		end
 	else
 		-- server =  self.store:fetch("servers",key)
 		return self.members[key]
