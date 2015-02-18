@@ -218,14 +218,14 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 				logger:error("unable to add id to 'buckets' DB",err)
 				return nil,err
 			end
-			data.created_at = math.floor(hrtime() * 100)
+			data.created_at = hrtime() * 100000
 			data.last_updated = data.created_at
 		else
 			-- there has got to be a better way to do this.
 			local obj = JSON.parse(json)
 			-- we carry over the created_at
 			data.created_at = obj.created_at
-			data.last_updated = math.floor(hrtime() * 100)
+			data.last_updated = hrtime() * 100000
 		end
 		data.bucket = b_id
 		data.id = id
@@ -241,12 +241,9 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	end
 
 	local op
-	local op_timestamp
 	if not sync then
 		op = JSON.stringify({action = "store",data = data})
-		 op_timestamp = hrtime() * 100000
-		self.version = op_timestamp
-		local err = Txn.put(txn,logs,self.version,op,0)
+		local err = Txn.put(txn,logs,data.last_updated,op,0)
 
 		if err then
 			logger:error("unable to add to commit log",key,err)
@@ -276,7 +273,7 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	end
 	
 	if not sync then
-		self:replicate(op,op_timestamp,cb,#self.master_replication + 1)
+		self:replicate(op,data.last_updated,cb,#self.master_replication + 1)
 	end
 end
 
@@ -314,8 +311,7 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 	if not sync then
 		op = JSON.stringify({action = "delete",data = {bucket = b_id,id = id}})
 		 op_timestamp = hrtime() * 100000
-		self.version = op_timestamp
-		local err = Txn.put(txn,logs,self.version,op,0)
+		local err = Txn.put(txn,logs,op_timestamp,op,0)
 
 		if err then
 			logger:error("unable to add to commit log",key,err)
@@ -349,6 +345,9 @@ function  Store:replicate(operation,op_timestamp,cb,total)
 			cb(completed,nil)
 		end
 		if completed == 1 then
+			if op_timestamp > self.version then
+				self.version = op_timestamp
+			end
 			local txn,err = Env.txn_begin(self.env,nil,0)
 			if err then
 				logger:error("unable to begin txn to clear log")

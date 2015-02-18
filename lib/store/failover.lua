@@ -103,6 +103,8 @@ return function(Store)
 				else
 					local dropped = false
 					local need_refresh = false
+					local new_version = 0
+
 					res:on('data', function (chunk)
 						local event = JSON.parse(chunk)
 						if event == true then
@@ -129,7 +131,12 @@ return function(Store)
 									end
 								end)
 							end
+							logger:info("updating version to",new_version)
+							self.version = new_version
 						elseif syncd then
+							if event.data.last_updated > self.version then
+									self.version = event.data.last_updated
+								end
 							if event.action == "store" then
 								event = event.data
 								logger:info("sync (store)",event.bucket,event.id)
@@ -154,6 +161,9 @@ return function(Store)
 							-- we don't want to broadcast these changes, they aren't
 							-- available yet.
 							self:_store(event.bucket,event.id,event,true,false,txn)
+							if event.last_updated > new_version then
+								new_version = event.last_updated
+							end
 						end
 					end)
 				end
@@ -204,8 +214,15 @@ return function(Store)
 			logger:info("log cursor open")
 
 			local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"unsigned long*")
-			logger:info("comparing last known logs",key,version)
-			if (key and not (key[0] == version)) or not key then
+			
+			logger:info("comparing last known logs",self.version,key,version)
+
+			if not key then
+				key = self.version
+			else
+				key = key[0]
+			end			
+			if (key and not (key == version)) or (not key and not(self.version == version) ) then
 				logger:info("performing full sync")
 				local objects,err = DB.open(txn,"objects",0)
 				if err then
@@ -227,8 +244,11 @@ return function(Store)
 			else
 				logger:info("performing partial sync")
 				while key do
-					sync:emit("event",op)
-					key,op,err = Cursor.get(cursor,key,Cursor.MDB_NEXT)
+					if op then
+						logger:info("syncing",op)
+						sync:emit("event",op)
+					end
+					key,op,err = Cursor.get(cursor,nil,Cursor.MDB_NEXT)
 				end
 			end
 			logger:info('sync is complete')
