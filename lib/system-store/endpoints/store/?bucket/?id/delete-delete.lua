@@ -10,18 +10,42 @@
 ---------------------------------------------------------------------
 
 return function(req,res)
-	if not req.headers["last-known-update"] then
-		req.headers["last-known-update"] = 0
-	end
 	logger:info("delete",req.env.bucket,req.env.id)
+	local object,err
+	local nodes = req.headers['x-commit-nodes']
+	if nodes == 'all' then
+		nodes = 0
+	elseif nodes then
+		nodes = tonumber(nodes)
+	else
+		nodes = 1
+	end
+	logger:info("committing delete on nodes: ",nodes)
+
+	local done = false
+
+	local cb = function(current,total)
+		if done then 
+			return
+		elseif ((nodes < 1 and nodes > 0) and (current/total >= nodes)) then
+			done = true
+			res:writeHead(204,{})
+			res:finish()
+		elseif (nodes >= 1) and (current >= nodes) then
+			done = true
+			res:writeHead(204,{})
+			res:finish()
+		elseif current == total then
+			done = true
+			res:writeHead(204,{})
+			res:finish()
+		end
+	end
 	
-	local updated,err = store:delete(req.env.bucket,req.env.id)
+	local updated,err = store:delete(req.env.bucket,req.env.id,cb)
 	if err then
 		local code = error_code(err)
 		res:writeHead(code,{})
 		res:finish(JSON.stringify({error = err}))
-	else
-		res:writeHead(204,{})
-		res:finish()
 	end
 end

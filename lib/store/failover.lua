@@ -38,7 +38,7 @@ return function(Store)
 						if not worked then
 							logger:error(err)
 						end
-					client:close()
+					client:destroy()
 				end
 			end)
 			client:on('end',function()
@@ -96,7 +96,7 @@ return function(Store)
 						if not worked then
 							logger:error(err)
 						end
-						client:close()
+						client:destroy()
 					end
 				end)
 				client:once('end',function()

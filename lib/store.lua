@@ -291,11 +291,13 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	if not(sync) and not(self.loading) then
 		self:replicate(op,data.last_updated,cb,#self.push_connections)
 	end
+	return data
 end
 
 function Store:_delete(b_id,id,sync,broadcast,parent,cb)
-	
 	local txn,objects,buckets,logs,err = self:start(parent)
+	local key = b_id .. ":" .. id
+
 	if err then
 		logger:warning("unable to delete data",err)
 		return nil,err
@@ -303,8 +305,9 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 
 	local json,err = Txn.get(txn,objects,key)
 	-- there has got to be a better way to do this.
+	logger:info(json,err)
 	if not json then
-		return nil,err
+		return 
 	end
 	local obj = JSON.parse(json)
 
@@ -361,15 +364,14 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 end
 
 function  Store:replicate(operation,op_timestamp,cb)
-	local total = 0
+	local total = 1
 	logger:info("starting to clean logs",op_timestamp)
 	local current = 0
 	local complete = function()
 		logger:info('remote reported that log was committed')
 		current = current + 1
 		if cb then
-			-- we add one to each to reflect this node
-			cb(current + 1,total + 1,nil)
+			cb(current,total,nil)
 		end
 		if current == total then
 			logger:info("all remotes have reported, now cleaning logs")
@@ -399,11 +401,7 @@ function  Store:replicate(operation,op_timestamp,cb)
 		connection.events:once(tostring(op_timestamp),complete)
 	end
 
-	if total == 0 then
-		if cb then
-			cb(1,1,nil)
-		end
-	end
+	timer.setTimeout(0,complete)
 end
 
 function Store:compile(data,bucket,id)
@@ -418,6 +416,8 @@ function Store:compile(data,bucket,id)
 			,store = self
 			,logger = logger
 			,JSON = JSON
+			,tonumber = tonumber
+			,tostring = tostring
 			,error_code = self.api.error_code
 			,require = function() end} -- this needs to be fixed.
 	local fn,err = self:build(data,script,env,bucket,id)

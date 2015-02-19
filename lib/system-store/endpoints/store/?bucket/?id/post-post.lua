@@ -23,21 +23,46 @@ return function(req,res)
 			res:writeHead(400,{})
 			res:finish('{"error":"bad json"}')
 		end)
+		
 
 		if success then
-			
-			local object,err = store:store(req.env.bucket,req.env.id,data)
-			if object then
-				-- we can't stringify a function
-				object.script = nil
+			local object,err
+			local nodes = req.headers['x-commit-nodes']
+			if nodes == 'all' then
+				nodes = 0
+			elseif nodes then
+				nodes = tonumber(nodes)
+			else
+				nodes = 1
 			end
+			logger:info("committing post on nodes:",nodes)
+
+			local done = false
+
+			local cb = function(current,total)
+				if done then 
+					return
+				elseif ((nodes < 1 and nodes > 0) and (current/total >= nodes)) then
+					done = true
+					res:writeHead(201,{})
+					res:finish(JSON.stringify(object))
+				elseif (nodes >= 1) and (current >= nodes) then
+					done = true
+					res:writeHead(201,{})
+					res:finish(JSON.stringify(object))
+				elseif current == total then
+					done = true
+					res:writeHead(201,{})
+					res:finish(JSON.stringify(object))
+				end
+			end
+
+			object,err = store:store(req.env.bucket,req.env.id,data,cb)
+			
 			if err then
 				local code = error_code(err)
 				res:writeHead(code,{})
-				res:finish(JSON.stringify({error = err,updated = object}))
-			else
-				res:writeHead(201,{})
-				res:finish(JSON.stringify(object))
+				res:finish(JSON.stringify({error = err}))
 			end
 		end
 	end)

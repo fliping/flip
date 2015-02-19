@@ -321,14 +321,14 @@ function Txn.get(txn,dbi,key,cast)
 	return string,MDB.error(err)
 end
 
-function Txn.del(enx,dbi,key,data)
+function Txn.del(txn,dbi,key,data)
 	local index = build_MDB_val(key)
 	local value
 	if data then
 		value = build_MDB_val(data)
 	end
 
-	local err = lmdb.mdb_del(env,dbi,index,value)
+	local err = lmdb.mdb_del(txn,dbi,index,value)
 	return MDB.error(err)
 end
 
