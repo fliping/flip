@@ -9,6 +9,7 @@
 -- Created :   18 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
+local Emitter = require('core').Emitter
 local logger = require('../logger')
 local Packet = require('../packet')
 local JSON = require('json')
@@ -35,6 +36,7 @@ function write(client)
 				end
 			end
 		else
+
 			local a,b,c,d = Packet:pack(data:len())
 			client:write(a .. b .. c .. d .. data)
 		end
@@ -63,45 +65,52 @@ function parser(buffer)
 	return buffer,operations
 end
 
+
+function push_flush_logs(operation,client)
+	logger:info("client has commited",operation)
+	client.events:emit(operation)
+	return push_flush_logs
+end
+
 function push_sync(operation,client)
 	local version = operation
 	local txn,err = Env.txn_begin(client.env,nil,Txn.MDB_RDONLY)
 	if err then
-		logger:error("unable to begin txn to clear log")
+		logger:warning("unable to begin txn to clear log")
 		return
 	end
 
-	logger:info("sync transaction begun",version)
+	logger:debug("sync transaction begun",version)
 
 	local logs,err = DB.open(txn,"logs",DB.MDB_DUPSORT)
 	if err then
-		logger:info("unable to open 'logs' DB",err)
-		return nil,err
+		logger:warning("unable to open 'logs' DB",err)
+		return
 	end
 	local cursor,err = Cursor.open(txn,logs)
 	if err then
-		logger:info("unable to create cursor",err)
-		return nil,err
+		logger:warning("unable to create cursor",err)
+		return
 	end
 
-	logger:info("log cursor open")
+	logger:debug("log cursor open")
 
 	local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"unsigned long*")
 	
-	logger:info("comparing last known logs",client.version,key,version)
+	logger:debug("comparing last known logs",client.version,key,version)
 
 	if not key then
 		logger:info("performing full sync")
 		local objects,err = DB.open(txn,"objects",0)
 		if err then
-			logger:info("unable to open 'objects' DB",err)
-			return nil,err
+			logger:warning("unable to open 'objects' DB",err)
+			return
 		end
 
 		local obj_cursor,err = Cursor.open(txn,objects)
 		if err then
-			logger:info("unable to create cursor",err)
-			return nil,err
+			logger:warning("unable to create cursor",err)
+			return
 		end
 		local id,json,err = Cursor.get(obj_cursor,version,Cursor.MDB_FIRST)
 		while json do
@@ -117,7 +126,7 @@ function push_sync(operation,client)
 		while key do
 			key,op,err = Cursor.get(cursor,nil,Cursor.MDB_NEXT)
 			if op then
-				logger:info("syncing",op)
+				logger:debug("syncing",op)
 				client.write(op)
 			end
 		end
@@ -129,7 +138,7 @@ end
 
 function push_find_common(operation,client)
 	local version = tonumber(operation)
-	logger:info("trying to find a common point",version)
+	logger:debug("trying to find a common point",version)
 	push_sync(version,client)
 	-- something like this...
 	client.write("",true)
@@ -137,7 +146,7 @@ function push_find_common(operation,client)
 end
 
 function push_port(operation,client)
-	logger:info("starting a connection back",client.remote_ip,tonumber(operation))
+	logger:debug("starting a connection back",client.remote_ip,tonumber(operation))
 	store:begin_sync(client.remote_ip,tonumber(operation))
 	return push_find_common
 end
@@ -157,19 +166,15 @@ function push_identify(operation,client,connections)
 	return push_ip
 end
 
-function push_flush_logs(operation,client)
-	logger:info("client has commited",operation)
-	return push_flush_logs
-end
-
 function push_init(connections,client,id,env)
-	logger:info("push connected")
+	logger:debug("push connected")
 	client = wrap(client)
 	state = push_identify
 	local buffer = ""
 	local chunk
 	client.local_id = id
 	client.env = env
+	client.events = Emitter:new()
 
 	client.write(id)
 	chunk = coroutine.yield()
@@ -187,7 +192,12 @@ end
 
 
 function pull_replicate(operation,client)
-	logger:info("pull got a replicate")
+	logger:debug("pull got a replicate",operation)
+	-- so there is a bug that causes an empty operation to come across
+	-- the first time that the connection is in this state.
+	if operation:len() == 0 then
+		return pull_replicate
+	end
 	operation = JSON.parse(operation)
 	local txn = Env.txn_begin(client.env,nil,0)
 	local replication,err = DB.open(txn,"replication",0)
@@ -199,41 +209,46 @@ function pull_replicate(operation,client)
 	local event = operation.data
 
 	err = Txn.put(txn,replication,client.remote_id,event.last_updated,0)
-	logger:info("pulled",client.remote_id,event.id,event.last_updated)
+	logger:debug("pulled",client.remote_id,event.id,event.last_updated)
 	if operation.action == "store" then
 		store:_store(event.bucket,event.id,event,true,false,txn)
 	elseif operation.action == "delete" then
 		store:_delete(event.bucket,event.id,true,false,txn)
 	end
 	local err = Txn.commit(txn)
-	-- and now we need to replicate it out.
-	store:emit(event.b_id,operation.action,event.id,event)
 	if err then
 		logger:warning("unable to store replicated data",err)
 		return
 	end
+
+	-- replicate the change out.
+	store:emit(event.b_id,operation.action,event.id,event)
+	-- respond to the push that the change was commited
+	client.write(tostring(event.last_updated))
+
 	return pull_replicate
 end
 
 function pull_sync(operation,client)
 	if operation == "" then
-		logger:info("now all data needs to be refreshed on this node",client.remote_id,client.last_updated)
+		logger:debug("now all data needs to be refreshed on this node",client.remote_id,client.last_updated)
 
 		err = Txn.put(client.txn,client.replication,client.remote_id,client.last_updated,0)
 		if err then
-			logger:error("unable to sync up with remote",err)
+			logger:warning("unable to sync up with remote",err)
 			return
 		end
-		logger:info("last sync point",client.last_updated)
+		logger:info("last sync point",client.last_updated,client.remote_id)
 		err = Txn.commit(client.txn)
 		client.txn = nil
 		if err then
-			logger:error("unable to sync up with remote",err)
+			logger:warning("unable to sync up with remote",err)
 			return
 		end
 		if client.cb then
 			client.cb()
 		end
+		store:emit("refresh")
 		return pull_replicate
 	else
 		local event = JSON.parse(operation)
@@ -246,7 +261,7 @@ function pull_sync(operation,client)
 end
 
 function pull_identify(operation,client)
-	logger:info("storing remote id",operation)
+	logger:debug("storing remote id",operation)
 	client.remote_id = operation
 	local replication,err = DB.open(client.txn,"replication",0)
 	if err then
@@ -257,24 +272,24 @@ function pull_identify(operation,client)
 	client.replication = replication
 	local last_updated,err = Txn.get(client.txn,replication,operation,"unsigned long*")
 	if last_updated then
-		logger:info("found last sync point",tonumber(last_updated[0]))
+		logger:info("found last sync point",tonumber(last_updated[0]),operation)
 		client.write(tostring(tonumber(last_updated[0])))
 	else
-		logger:info("first sync")
+		logger:info("first sync",operation)
 		client.write("0")
 	end
 	return pull_sync
 end
 
 function pull_init(env,id,ip,port,client,cb)
-	logger:info("pull is connected!")
+	logger:debug("pull is connected!")
 	client = wrap(client)
 	client.env = env
 	local txn,err = Env.txn_begin(env,nil,0)
 	client.txn = txn
 	client.cb = cb
 	client.last_updated = 0
-	logger:info("going to send",id,ip,port)
+	logger:debug("going to send",id,ip,port)
 	client.write(id)
 	client.write(ip)
 	client.write(tostring(port))

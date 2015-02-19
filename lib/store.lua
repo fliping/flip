@@ -33,6 +33,7 @@ function Store:configure(path,id,version,ip,port,api)
 	self.port = port
 	self.is_master = true
 	self.connections = {}
+	self.push_connections = {}
 	self.master = {}
 	self.master_replication = {}
 	self.db_path = path
@@ -288,7 +289,7 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	end
 	
 	if not(sync) and not(self.loading) then
-		self:replicate(op,data.last_updated,cb,#self.master_replication + 1)
+		self:replicate(op,data.last_updated,cb,#self.push_connections)
 	end
 end
 
@@ -355,54 +356,54 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 	end
 	
 	if not sync then
-		self:replicate(op,op_timestamp,cb,#self.master_replication + 1)
+		self:replicate(op,op_timestamp,cb)
 	end
 end
 
-function  Store:replicate(operation,op_timestamp,cb,total)
-	if cb then
-		cb(completed,nil)
+function  Store:replicate(operation,op_timestamp,cb)
+	local total = 0
+	logger:info("starting to clean logs",op_timestamp)
+	local current = 0
+	local complete = function()
+		logger:info('remote reported that log was committed')
+		current = current + 1
+		if cb then
+			-- we add one to each to reflect this node
+			cb(current + 1,total + 1,nil)
+		end
+		if current == total then
+			logger:info("all remotes have reported, now cleaning logs")
+			local txn,err = Env.txn_begin(self.env,nil,0)
+			if err then
+				logger:error("unable to begin txn to clear log")
+				return
+			end
+			local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
+			if err then
+				Txn.abort(txn)
+				logger:error("unable to open logs DB for cleaning")
+				return
+			end
+			Txn.del(txn,logs,op_timestamp)
+			err = Txn.commit(txn)
+			if err then
+				logger:error("unable to open clean logs DB")
+			end
+		end
 	end
-	-- self:emit('sync',operation)
-	-- local complete = function(completed)
-	-- 	if cb then
-	-- 		cb(completed,nil)
-	-- 	end
-	-- 	if completed == 1 then
-	-- 		if op_timestamp > self.version then
-	-- 			self.version = op_timestamp
-	-- 		end
-	-- 		local txn,err = Env.txn_begin(self.env,nil,0)
-	-- 		if err then
-	-- 			logger:error("unable to begin txn to clear log")
-	-- 			return
-	-- 		end
-	-- 		local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
-	-- 		if err then
-	-- 			Txn.abort(txn)
-	-- 			logger:error("unable to open logs DB for cleaning")
-	-- 			return
-	-- 		end
-	-- 		Txn.del(txn,logs,op_timestamp)
-	-- 		err = Txn.commit(txn)
-	-- 		if err then
-	-- 			logger:error("unable to open clean logs DB")
-	-- 		end
-	-- 	end
-	-- end
-
-	-- local current = 1
 	
-	-- this needs to be implemented eventually
+	for id,connection in pairs(self.push_connections) do
+		total = total + 1
+		logger:info("writing",tostring(op_timestamp),connection.id)
+		connection.write(operation)
+		connection.events:once(tostring(op_timestamp),complete)
+	end
 
-	-- for _idx,connection in pairs(self.master_replication) do
-	-- 	connection:send(op,function()
-	-- 		current = current + 1
-	-- 		cb(current/total,nil)
-	-- 	end)
-	-- end
-	-- complete(current/total)
-	-- complete(1)
+	if total == 0 then
+		if cb then
+			cb(1,1,nil)
+		end
+	end
 end
 
 function Store:compile(data,bucket,id)

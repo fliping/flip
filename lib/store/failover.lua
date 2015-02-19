@@ -9,7 +9,6 @@
 -- Created :   4 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
-local Emitter = require('core').Emitter
 local logger = require('../logger')
 local Packet = require('../packet')
 local JSON = require('json')
@@ -34,12 +33,18 @@ return function(Store)
 			logger:info("client connected")
 			local state_machine = coroutine.create(Init.push)
 			client:on('data',function(data)
-				logger:info(coroutine.resume(state_machine,data))
+				local worked,err = coroutine.resume(state_machine,data)
+					if coroutine.status(state_machine) == "dead" then
+						if not worked then
+							logger:error(err)
+						end
+					client:close()
+				end
 			end)
 			client:on('end',function()
-				logger:info(coroutine.resume(state_machine,false))
+				coroutine.resume(state_machine,false)
 			end)
-			logger:info(coroutine.resume(state_machine,self.connections,client,self.id,self.env))
+			coroutine.resume(state_machine,self.push_connections,client,self.id,self.env)
 		end):listen(self.port,self.ip)
 
 		logger:info("tcp replication socket is open")
@@ -86,8 +91,11 @@ return function(Store)
 				logger:info("connected to remote",ip,port)
 				local state_machine = coroutine.create(Init.pull)
 				client:on('data',function(data)
-					coroutine.resume(state_machine,data)
+					local worked,err = coroutine.resume(state_machine,data)
 					if coroutine.status(state_machine) == "dead" then
+						if not worked then
+							logger:error(err)
+						end
 						client:close()
 					end
 				end)
