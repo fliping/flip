@@ -86,14 +86,23 @@ return function(Store)
 				client:on('data',function(data)
 					logger:info(coroutine.resume(state_machine,data))
 				end)
-				client:on('end',function()
+				client:once('end',function()
 					logger:info(coroutine.resume(state_machine,false))
 					self.connections[key].timer = timer.setTimeout(5000,function() self:begin_sync(ip,port,cb) end)
 					self.connections[key].connection = nil
 				end)
-				
+				client:once('error',function(err)
+					coroutine.resume(state_machine,false)
+				end)
 				logger:info(coroutine.resume(state_machine,self.env,self.id,self.ip,self.port,client,cb))
 			end)
+
+			client:once('error',function(err)
+				logger:info("we errored out",err)
+				self.connections[key].timer = timer.setTimeout(5000,function() self:begin_sync(ip,port,cb) end)
+				self.connections[key].connection = nil
+			end)
+
 			self.connections[key] = {connection = client}
 		end
 	end

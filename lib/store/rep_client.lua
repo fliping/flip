@@ -134,8 +134,9 @@ function push_sync(operation,client)
 end
 
 function push_find_common(operation,client)
-	logger:info("trying to find a common point",operation)
-	push_sync(operation,client)
+	local version = tonumber(operation)
+	logger:info("trying to find a common point",version)
+	push_sync(version,client)
 	-- something like this...
 	client.write("",true)
 	return push_flush_logs
@@ -153,7 +154,7 @@ function push_ip(operation,client)
 end
 
 function push_identify(operation,client,connections)
-	logger:info("push connected",operation)
+	logger:info("push identify",operation)
 	if connections[operation] then
 		logger:warning("client reconnected",operation)
 		connections[operation].close()
@@ -169,7 +170,7 @@ function push_flush_logs(operation,client)
 end
 
 function push_init(connections,client,id,env)
-	logger:info("push connected",connections,client,id)
+	logger:info("push connected")
 	client = wrap(client)
 	state = push_identify
 	local buffer = ""
@@ -193,9 +194,9 @@ end
 
 
 function pull_replicate(operation,client)
-	logger:info("got a replicate",operation)
+	logger:info("pull got a replicate")
 	operation = JSON.parse(operation)
-	local txn = Env.txn_begin(env,nil,0)
+	local txn = Env.txn_begin(client.env,nil,0)
 	local replication,err = DB.open(txn,"replication",0)
 	if err then
 		Txn.abort(txn)
@@ -204,14 +205,16 @@ function pull_replicate(operation,client)
 	end
 	local event = operation.data
 
-	err = Txn.put(txn,replication,client.id,event.last_updated,0)
-	logger:info("pulled",event.id,err)
+	err = Txn.put(txn,replication,client.remote_id,event.last_updated,0)
+	logger:info("pulled",client.remote_id,event.id,event.last_updated,err)
 	if operation.action == "store" then
-		store:_store(event.bucket,event.id,event,true,true,txn)
+		store:_store(event.bucket,event.id,event,true,false,txn)
 	elseif operation.action == "delete" then
-		store:_delete(event.bucket,event.id,true,true,txn)
+		store:_delete(event.bucket,event.id,true,false,txn)
 	end
 	local err = Txn.commit(txn)
+	-- and now we need to replicate it out.
+	store:emit(event.b_id,operation.action,event.id,event)
 	if err then
 		logger:warning("unable to store replicated data",err)
 		-- we probably should close the connection at this point
@@ -222,7 +225,7 @@ end
 
 function pull_sync(operation,client)
 	if operation == "" then
-		logger:info("now all data needs to be refreshed on this node")
+		logger:info("now all data needs to be refreshed on this node",client.remote_id,client.last_updated)
 		err = Txn.put(client.txn,client.replication,client.remote_id,client.last_updated,0)
 		if err then
 			logger:error("unable to sync up with remote",err)
@@ -258,18 +261,21 @@ function pull_identify(operation,client)
 		-- now i need to close the connection
 	end
 	client.replication = replication
-	local last_updated,err = Txn.get(client.txn,replication,operation)
+	local last_updated,err = Txn.get(client.txn,replication,operation,"unsigned long*")
 	if last_updated then
-		client.write(last_updated)
+		logger:info("found last sync point",tonumber(last_updated[0]))
+		client.write(tostring(tonumber(last_updated[0])))
 	else
+		logger:info("first sync")
 		client.write("0")
 	end
 	return pull_sync
 end
 
 function pull_init(env,id,ip,port,client,cb)
-	logger:info("we are connected!",env,id,client,cb)
+	logger:info("pull is connected!")
 	client = wrap(client)
+	client.env = env
 	local txn,err = Env.txn_begin(env,nil,0)
 	client.txn = txn
 	client.cb = cb

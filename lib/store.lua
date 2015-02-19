@@ -212,11 +212,12 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 		local obj,err = Txn.get(txn,objects,key)
 		if obj then
 			obj = JSON.parse(obj)
-			if obj.last_updated > data.last_updated then
-				logger:info("got an update since the store was queued")
+			if obj.last_updated >= data.last_updated then
+				logger:debug("we have upto date data",b_id,id)
 				Txn.abort(txn)
 				return obj
 			end
+		else
 			Txn.put(txn,buckets,b_id,id,Txn.MDB_NODUPDATA)
 		end
 	else
@@ -227,8 +228,13 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 				logger:error("unable to add id to 'buckets' DB",err)
 				return nil,err
 			end
-			data.created_at = hrtime() * 100000
-			data.last_updated = data.created_at
+			if self.loading then
+				data.created_at = 0
+				data.last_updated = 0
+			else
+				data.created_at = hrtime() * 100000
+				data.last_updated = data.created_at
+			end
 		else
 			-- there has got to be a better way to do this.
 			local obj = JSON.parse(json)
@@ -281,7 +287,7 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 		self:emit(b_id,"store",id,data)
 	end
 	
-	if not sync then
+	if not(sync) and not(self.loading) then
 		self:replicate(op,data.last_updated,cb,#self.master_replication + 1)
 	end
 end

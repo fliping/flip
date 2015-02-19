@@ -72,11 +72,11 @@ return function(Store)
 					,debug = function() end}
 				env.store = self
 				setfenv(load,env)
-
+				self.loading = true
 				load(__dirname .. '/../system-topology','topology')
 				load(__dirname .. '/../system-store','store')
 				load(__dirname .. '/../system-dev','dev')
-
+				self.loading = false
 				logger:info('loaded bootstrapped store')
 			elseif err then
 				logger:fatal("unable to open disk store",err)
