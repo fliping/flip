@@ -39,7 +39,7 @@ return function(Store)
 			client:on('end',function()
 				logger:info(coroutine.resume(state_machine,false))
 			end)
-			logger:info(coroutine.resume(state_machine,self.connections,client,self.id))
+			logger:info(coroutine.resume(state_machine,self.connections,client,self.id,self.env))
 		end):listen(self.port,self.ip)
 
 		logger:info("tcp replication socket is open")

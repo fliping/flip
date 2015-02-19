@@ -209,7 +209,7 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	end
 
 	if sync then
-		local obj,err = Txn.get(txn,buckets,b_id,id)
+		local obj,err = Txn.get(txn,objects,key)
 		if obj then
 			obj = JSON.parse(obj)
 			if obj.last_updated > data.last_updated then
@@ -353,35 +353,36 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 end
 
 function  Store:replicate(operation,op_timestamp,cb,total)
-	self:emit('sync',operation)
-	local complete = function(completed)
-		if cb then
-			cb(completed,nil)
-		end
-		if completed == 1 then
-			if op_timestamp > self.version then
-				self.version = op_timestamp
-			end
-			local txn,err = Env.txn_begin(self.env,nil,0)
-			if err then
-				logger:error("unable to begin txn to clear log")
-				return
-			end
-			local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
-			if err then
-				Txn.abort(txn)
-				logger:error("unable to open logs DB for cleaning")
-				return
-			end
-			Txn.del(txn,logs,op_timestamp)
-			err = Txn.commit(txn)
-			if err then
-				logger:error("unable to open clean logs DB")
-			end
-		end
-	end
+	cb(completed,nil)
+	-- self:emit('sync',operation)
+	-- local complete = function(completed)
+	-- 	if cb then
+	-- 		cb(completed,nil)
+	-- 	end
+	-- 	if completed == 1 then
+	-- 		if op_timestamp > self.version then
+	-- 			self.version = op_timestamp
+	-- 		end
+	-- 		local txn,err = Env.txn_begin(self.env,nil,0)
+	-- 		if err then
+	-- 			logger:error("unable to begin txn to clear log")
+	-- 			return
+	-- 		end
+	-- 		local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
+	-- 		if err then
+	-- 			Txn.abort(txn)
+	-- 			logger:error("unable to open logs DB for cleaning")
+	-- 			return
+	-- 		end
+	-- 		Txn.del(txn,logs,op_timestamp)
+	-- 		err = Txn.commit(txn)
+	-- 		if err then
+	-- 			logger:error("unable to open clean logs DB")
+	-- 		end
+	-- 	end
+	-- end
 
-	local current = 1
+	-- local current = 1
 	
 	-- this needs to be implemented eventually
 
@@ -392,7 +393,7 @@ function  Store:replicate(operation,op_timestamp,cb,total)
 	-- 	end)
 	-- end
 	-- complete(current/total)
-	complete(1)
+	-- complete(1)
 end
 
 function Store:compile(data,bucket,id)

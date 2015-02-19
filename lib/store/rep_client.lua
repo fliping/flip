@@ -30,15 +30,15 @@ function write(client)
 				sync = true
 				-- we need to go through everything and send it off
 				for _idx,data in pairs(buffer) do
-					local size = Packet:pack(data:len())
-					logger:info("writing",size .. data)
-					client:write(size .. data)
+					local a,b,c,d = Packet:pack(data:len())
+					logger:info("writing",a .. b .. c .. d .. data)
+					client:write(a .. b .. c .. d .. data)
 				end
 			end
 		else
-			local size = Packet:pack(data:len())
-			logger:info("writing",size .. data)
-			client:write(size .. data)
+			local a,b,c,d = Packet:pack(data:len())
+			logger:info("writing",a .. b .. c .. d .. data)
+			client:write(a .. b .. c .. d .. data)
 		end
 	end
 end
@@ -59,12 +59,9 @@ function parser(buffer)
 	
 	local operations = {}
 	while #buffer > 4 do
-		logger:info("parsing",buffer)
 		local length = Packet:integerify(buffer:sub(1,4))
-		logger:info("checking",length,buffer:len())
 		if length + 4 <= buffer:len() then
-			local operation = buffer:sub(5,5 + length)
-			logger:info("got an operation",operation)
+			local operation = buffer:sub(5,4 + length)
 			buffer = buffer:sub(5 + length)
 			length = Packet:integerify(buffer:sub(1,4))
 			operations[#operations + 1] = operation
@@ -77,7 +74,7 @@ end
 
 function push_sync(operation,client)
 	local version = tonumber(operation)
-	local txn,err = Env.txn_begin(self.env,nil,0)
+	local txn,err = Env.txn_begin(client.env,nil,0)
 	if err then
 		logger:error("unable to begin txn to clear log")
 		return
@@ -99,10 +96,11 @@ function push_sync(operation,client)
 	logger:info("log cursor open")
 
 	local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"unsigned long*")
+	local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"unsigned long*")
 	
-	logger:info("comparing last known logs",self.version,key,version)
+	logger:info("comparing last known logs",client.version,key,version)
 
-	if key and not (key[1] == version) then
+	if not key then
 		logger:info("performing full sync")
 		local objects,err = DB.open(txn,"objects",0)
 		if err then
@@ -163,13 +161,14 @@ function push_flush_logs(operation,client)
 	return push_flush_logs
 end
 
-function push_init(connections,client,id)
+function push_init(connections,client,id,env)
 	logger:info("push connected",connections,client,id)
 	client = wrap(client)
 	state = push_identify
 	local buffer = ""
 	local chunk
 	client.local_id = id
+	client.env = env
 
 	client.write(id)
 	chunk = coroutine.yield()
@@ -213,16 +212,15 @@ function pull_replicate(operation,client)
 end
 
 function pull_sync(operation,client)
-	logger:info("got a sync",operation)
 	if operation == "" then
 		logger:info("now all data needs to be refreshed on this node")
-		local replication,err = DB.open(txn,"replication",0)
+		local replication,err = DB.open(client.txn,"replication",0)
 		if err then
-			Txn.abort(txn)
+			Txn.abort(client.txn)
 			logger:warning("unable to open replication DB",err)
 			-- now i need to close the connection
 		end
-		err = Txn.put(txn,replication,client.id,client.last_updated,0)
+		err = Txn.put(client.txn,replication,client.id,client.last_updated,0)
 		if err then
 			logger:error("unable to sync up with remote",err)
 			-- i probably should close the connection here
@@ -247,6 +245,18 @@ end
 function pull_identify(operation,client)
 	logger:info("storing remote id",operation)
 	client.remote_id = operation
+	local replication,err = DB.open(client.txn,"replication",0)
+	if err then
+		Txn.abort(client.txn)
+		logger:warning("unable to open replication DB",err)
+		-- now i need to close the connection
+	end
+	local last_updated,err = Txn.get(client.txn,replication,operation)
+	if last_updated then
+		client.write(last_updated)
+	else
+		client.write("0")
+	end
 	return pull_sync
 end
 
@@ -262,7 +272,6 @@ function pull_init(env,id,client,cb)
 
 	chunk = coroutine.yield()
 	while chunk do
-		logger:info("processing chunk",chunk)
 		buffer = buffer .. chunk
 		buffer,operations = parser(buffer)
 		for _,operation in pairs(operations) do
