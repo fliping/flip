@@ -1,0 +1,7 @@
+./extention/mdb:
+	git clone https://gitorious.org/mdb/mdb.git ./extention/mdb
+
+
+all: ./extention/mdb
+	git submodule update --init --recursive
+	make -C ./extention/mdb/libraries/liblmdb
