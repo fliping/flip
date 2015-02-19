@@ -144,7 +144,7 @@ function request(method,prefix,bucket,id,data,headers,cb)
 
 	local options =
 			{host = "127.0.0.1" -- these need to be pulled from the config file...
-			,port = 8081
+			,port = 8080
 			,method = method
 			,path = path
 			,headers = headers}
@@ -181,7 +181,7 @@ function request(method,prefix,bucket,id,data,headers,cb)
 			end
 		end)
 	end)
-	req:on('error',cb)
+	req:on('error',function(err) cb(nil,err) end)
 	req:done(data)
 end
 

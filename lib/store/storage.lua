@@ -23,7 +23,7 @@ return function(Store)
 	function Store:load_from_disk(cb)
 		fs.stat(self.db_path,function(_,exists)
 			local env,err = Env.create()
-			Env.set_maxdbs(env,3)
+			Env.set_maxdbs(env,4)
 			if err then 
 				logger:fatal('unable to create store',err)
 				process.exit(1)
@@ -36,6 +36,7 @@ return function(Store)
 			self.env = env
 			local txn = Env.txn_begin(env,nil,0)
 			DB.open(txn,"objects",DB.MDB_CREATE)
+			DB.open(txn,"replication",DB.MDB_CREATE)
 			local logs,err1 = DB.open(txn,"logs",DB.MDB_CREATE + DB.MDB_INTEGERKEY)
 			local cursor = Cursor.open(txn,logs)
 			local key,_op = Cursor.get(cursor,nil,Cursor.MDB_LAST,"unsigned long*")
@@ -83,6 +84,7 @@ return function(Store)
 			else
 				logger:info('store was loaded from disk')
 			end
+			self:start_replication_connection()
 			cb()
 		end)
 	end

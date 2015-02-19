@@ -42,7 +42,8 @@ function Flip:initialize(config)
 	-- this needs to be reworked.
 	----
 	-- create a unique id for this store. bascially a UUID
-	self.store = Store:new(config.db,config.id,{node = config.id,time = hrtime(),random = math.random(100000)},config.api.api,config.api.port,self.api)
+	self.store = Store
+	Store:configure(config.db,config.id,{node = config.id,time = hrtime(),random = math.random(100000)},config.replication.ip,config.replication.port,self.api)
 end
 
 function Flip:start()
@@ -64,6 +65,8 @@ function Flip:start()
 					,port = self.config.gossip.port
 					,http_ip = self.config.api.ip
 					,http_port = self.config.api.port
+					,replication_ip = self.config.replication.ip
+					,replication_port = self.config.replication.port
 					,systems = {'store'}}
 				local object,err = self.store:store("servers",self.config.id,me)
 				if err then
@@ -86,7 +89,7 @@ function Flip:start()
 			self.store:on("servers",function(kind,id,data) self:process_server_update(kind,id,data) end)
 
 			-- double check that the default config has been added in
-			local config,err = self.store:fetch("config",self.config.id)
+			local config,err = self.store:fetch("config","cluster")
 			logger:debug("got config",config,err,self.id)
 			if err == "MDB_NOTFOUND: No matching key/data pair found" then
 				key = "secret"
@@ -95,14 +98,16 @@ function Flip:start()
 					,["ping_per_interval"] = 1
 					,["ping_timeout"] = 1500
 					,["key"] = key:sub(0,32) .. string.rep("0",32 - math.min(32,key:len()))}
-				self.store:store("config",self.config.id,config)
+				self.store:store("config","cluster",config)
 			elseif err then
 				logger:error("unable check config")
 			end
 
+			local id = self.config.id
 			for key,value in pairs(config) do
 				self.config[key] = value
 			end
+			self.config.id = id
 			-- now that we have been added in, lets start up the system
 			self.system:enable()
 

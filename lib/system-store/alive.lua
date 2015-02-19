@@ -14,7 +14,7 @@ return function(members,cb)
 	for idx,member in pairs(members) do
 
 		if not (store.id == member.id) then
-			store:begin_sync(member.http_ip,member.http_port)
+			store:begin_sync(member.replication_ip,member.replication_port)
 		end
 	end
 	cb()

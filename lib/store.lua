@@ -22,10 +22,10 @@ Txn = lmmdb.Txn
 Cursor = lmmdb.Cursor
 
 local Store = Emitter:extend()
-require('./store/failover')(Store)
-require('./store/storage')(Store)
 
-function Store:initialize(path,id,version,ip,port,api)
+function Store:configure(path,id,version,ip,port,api)
+	require('./store/failover')(Store)
+	require('./store/storage')(Store)
 	self.api = api
 	self.id = id
 	self.scripts = {}
@@ -209,7 +209,15 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	end
 
 	if sync then
-		Txn.put(txn,buckets,b_id,id,Txn.MDB_NODUPDATA)
+		local obj,err = Txn.get(txn,buckets,b_id,id)
+		if obj then
+			obj = JSON.parse(obj)
+			if obj.last_updated > data.last_updated then
+				logger:info("got an update since the store was queued")
+				return obj
+			end
+			Txn.put(txn,buckets,b_id,id,Txn.MDB_NODUPDATA)
+		end
 	else
 		local json,err = Txn.get(txn,objects,key)
 		if err then
@@ -318,6 +326,12 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 			Txn.abort(txn)
 			return nil,err
 		end
+	else
+		if obj.last_updated > hrtime() * 100000 then
+			logger:info("got an update since the delete was queued")
+			Txn.abort(txn)
+			return
+		end
 	end
 
 	-- commit all changes
@@ -415,4 +429,4 @@ function Store:build(data,script,env,bucket,id)
 	end
 end
 
-return Store
+return Store:new()

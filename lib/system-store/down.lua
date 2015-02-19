@@ -6,19 +6,16 @@
 -- @doc
 --
 -- @end
--- Created :   4 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
+-- Created :   2 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 
-return function(req,res)
-	local sync,err = store:sync(req.env.version)
-	if err then
-		local code = error_code(err)
-		res:writeHead(code,{})
-		res:finish(JSON.stringify({error = err}))
-	else
-		res:writeHead(200,{})
-		sync:on('event',function(object)
-			res:write(object)
-		end)
+-- when a new master is chosen this script is called.
+return function(members,cb)
+	for idx,member in pairs(members) do
+
+		if not (store.id == member.id) then
+			store:cancel_sync(member.http_ip,member.http_port)
+		end
 	end
+	cb()
 end
