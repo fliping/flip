@@ -49,14 +49,16 @@ return function(Store)
 
 	function Store:cancel_sync(ip,port)
 		local sync = self.connections[ip .. ":" .. port]
-		if sync.timer then
-			timer.clearTimer(sync.timer)
+		if sync then
+			if sync.timer then
+				timer.clearTimer(sync.timer)
+			end
+			if sync.connection then
+				-- this isn't quite right
+				sync.connection:close()
+			end
+			self.connections[ip .. ":" .. port] = nil
 		end
-		if sync.connection then
-			-- this isn't quite right
-			sync.connection:close()
-		end
-		self.connections[ip .. ":" .. port] = nil
 	end
 
 	function Store:begin_sync(ip,port,cb)
