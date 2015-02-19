@@ -41,16 +41,9 @@ function write(client)
 	end
 end
 
-function close(client)
-	return function()
-
-	end
-end
-
 function wrap(client)
 	return {connection = connection
-	,write = write(client)
-	,close = close(client)}
+	,write = write(client)}
 end
 
 function parser(buffer)
@@ -112,6 +105,7 @@ function push_sync(operation,client)
 		end
 		local id,json,err = Cursor.get(obj_cursor,version,Cursor.MDB_FIRST)
 		while json do
+
 			client.write(json)
 			id,json,err = Cursor.get(obj_cursor,id,Cursor.MDB_NEXT)
 		end	
@@ -121,11 +115,11 @@ function push_sync(operation,client)
 		logger:info("performing partial sync")
 		client.write("")
 		while key do
+			key,op,err = Cursor.get(cursor,nil,Cursor.MDB_NEXT)
 			if op then
 				logger:info("syncing",op)
 				client.write(op)
 			end
-			key,op,err = Cursor.get(cursor,nil,Cursor.MDB_NEXT)
 		end
 	end
 	logger:info('sync is complete')
@@ -157,7 +151,6 @@ function push_identify(operation,client,connections)
 	logger:info("push identify",operation)
 	if connections[operation] then
 		logger:warning("client reconnected",operation)
-		connections[operation].close()
 	end
 	connections[operation] = client
 	client.id = operation
@@ -206,7 +199,7 @@ function pull_replicate(operation,client)
 	local event = operation.data
 
 	err = Txn.put(txn,replication,client.remote_id,event.last_updated,0)
-	logger:info("pulled",client.remote_id,event.id,event.last_updated,err)
+	logger:info("pulled",client.remote_id,event.id,event.last_updated)
 	if operation.action == "store" then
 		store:_store(event.bucket,event.id,event,true,false,txn)
 	elseif operation.action == "delete" then
@@ -217,8 +210,7 @@ function pull_replicate(operation,client)
 	store:emit(event.b_id,operation.action,event.id,event)
 	if err then
 		logger:warning("unable to store replicated data",err)
-		-- we probably should close the connection at this point
-		-- and close this coroutine
+		return
 	end
 	return pull_replicate
 end
@@ -226,16 +218,18 @@ end
 function pull_sync(operation,client)
 	if operation == "" then
 		logger:info("now all data needs to be refreshed on this node",client.remote_id,client.last_updated)
+
 		err = Txn.put(client.txn,client.replication,client.remote_id,client.last_updated,0)
 		if err then
 			logger:error("unable to sync up with remote",err)
-			-- i probably should close the connection here
+			return
 		end
+		logger:info("last sync point",client.last_updated)
 		err = Txn.commit(client.txn)
 		client.txn = nil
 		if err then
 			logger:error("unable to sync up with remote",err)
-			-- i probably should close the connection here
+			return
 		end
 		if client.cb then
 			client.cb()
@@ -258,7 +252,7 @@ function pull_identify(operation,client)
 	if err then
 		Txn.abort(client.txn)
 		logger:warning("unable to open replication DB",err)
-		-- now i need to close the connection
+		return
 	end
 	client.replication = replication
 	local last_updated,err = Txn.get(client.txn,replication,operation,"unsigned long*")
@@ -293,6 +287,9 @@ function pull_init(env,id,ip,port,client,cb)
 		buffer,operations = parser(buffer)
 		for _,operation in pairs(operations) do
 			state = state(operation,client)
+			if not state then
+				return
+			end
 		end
 		chunk = coroutine.yield()
 	end

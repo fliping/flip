@@ -84,17 +84,20 @@ return function(Store)
 				logger:info("connected to remote",ip,port)
 				local state_machine = coroutine.create(Init.pull)
 				client:on('data',function(data)
-					logger:info(coroutine.resume(state_machine,data))
+					coroutine.resume(state_machine,data)
+					if coroutine.status(state_machine) == "dead" then
+						client:close()
+					end
 				end)
 				client:once('end',function()
-					logger:info(coroutine.resume(state_machine,false))
+					coroutine.resume(state_machine,false)
 					self.connections[key].timer = timer.setTimeout(5000,function() self:begin_sync(ip,port,cb) end)
 					self.connections[key].connection = nil
 				end)
 				client:once('error',function(err)
 					coroutine.resume(state_machine,false)
 				end)
-				logger:info(coroutine.resume(state_machine,self.env,self.id,self.ip,self.port,client,cb))
+				coroutine.resume(state_machine,self.env,self.id,self.ip,self.port,client,cb)
 			end)
 
 			client:once('error',function(err)
