@@ -175,25 +175,25 @@ end
 function Store:start(parent)
 	local txn,err = Env.txn_begin(self.env,parent,0)
 	if err then
-		return nil,nil,nil,nil,err
+		return nil,nil,nil,nil,"txn: "..err
 	end
 
 	local objects,err = DB.open(txn,"objects",0)
 	if err then
 		Txn.abort(txn)
-		return nil,nil,nil,nil,err
+		return nil,nil,nil,nil,"objects: "..err
 	end
 
 	local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
 	if err then
 		Txn.abort(txn)
-		return nil,nil,nil,nil,err
+		return nil,nil,nil,nil,"buckets: "..err
 	end
 
 	local logs,err = DB.open(txn,"logs",DB.MDB_INTEGERKEY)
 	if err then
 		Txn.abort(txn)
-		return nil,nil,nil,nil,err
+		return nil,nil,nil,nil,"logs: "..err
 	end
 
 	return txn,objects,buckets,logs
@@ -214,6 +214,7 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 			obj = JSON.parse(obj)
 			if obj.last_updated > data.last_updated then
 				logger:info("got an update since the store was queued")
+				Txn.abort(txn)
 				return obj
 			end
 			Txn.put(txn,buckets,b_id,id,Txn.MDB_NODUPDATA)
@@ -353,7 +354,9 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 end
 
 function  Store:replicate(operation,op_timestamp,cb,total)
-	cb(completed,nil)
+	if cb then
+		cb(completed,nil)
+	end
 	-- self:emit('sync',operation)
 	-- local complete = function(completed)
 	-- 	if cb then

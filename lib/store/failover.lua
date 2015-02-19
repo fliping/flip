@@ -45,39 +45,6 @@ return function(Store)
 		logger:info("tcp replication socket is open")
 	end
 
-	function Store:add_self_to_cluster(member,ip,port,cb)
-		local body = JSON.stringify(member)
-		local options = {
-			host = ip,
-			port = port,
-			method = 'post',
-			path = "/store/servers/" .. self.id,
-			headers = {
-				["Content-Type"] = "application/json",
-				["Content-Length"] = #body}
-		}
-
-		local req = http.request(options, function (res)
-			local chunks = {}
-			res:on('data', function (chunk)
-				chunks[#chunks + 1] = chunk
-				end)
-			res:on('end',function()
-				if (res.status_code > 199) and (res.status_code < 300) then
-					logger:info("node was added to cluster")
-					cb()
-				else
-					logger:error('got a bad response',table.concat(chunks))
-					cb("unable to sync with remote server")
-				end
-			end)
-		end)
-		req:on('error',cb)
-		req:on('end',function() end)
-		logger:info("adding this node to the cluster",body,self.id)
-		req:done(body)
-	end
-
 
 
 	function Store:cancel_sync(ip,port)
@@ -124,7 +91,8 @@ return function(Store)
 					self.connections[key].timer = timer.setTimeout(5000,function() self:begin_sync(ip,port,cb) end)
 					self.connections[key].connection = nil
 				end)
-				logger:info(coroutine.resume(state_machine,self.env,self.id,client,cb))
+				
+				logger:info(coroutine.resume(state_machine,self.env,self.id,self.ip,self.port,client,cb))
 			end)
 			self.connections[key] = {connection = client}
 		end

@@ -31,13 +31,11 @@ function write(client)
 				-- we need to go through everything and send it off
 				for _idx,data in pairs(buffer) do
 					local a,b,c,d = Packet:pack(data:len())
-					logger:info("writing",a .. b .. c .. d .. data)
 					client:write(a .. b .. c .. d .. data)
 				end
 			end
 		else
 			local a,b,c,d = Packet:pack(data:len())
-			logger:info("writing",a .. b .. c .. d .. data)
 			client:write(a .. b .. c .. d .. data)
 		end
 	end
@@ -73,8 +71,8 @@ function parser(buffer)
 end
 
 function push_sync(operation,client)
-	local version = tonumber(operation)
-	local txn,err = Env.txn_begin(client.env,nil,0)
+	local version = operation
+	local txn,err = Env.txn_begin(client.env,nil,Txn.MDB_RDONLY)
 	if err then
 		logger:error("unable to begin txn to clear log")
 		return
@@ -95,7 +93,6 @@ function push_sync(operation,client)
 
 	logger:info("log cursor open")
 
-	local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"unsigned long*")
 	local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"unsigned long*")
 	
 	logger:info("comparing last known logs",client.version,key,version)
@@ -140,8 +137,19 @@ function push_find_common(operation,client)
 	logger:info("trying to find a common point",operation)
 	push_sync(operation,client)
 	-- something like this...
-	client.write(nil,true)
+	client.write("",true)
 	return push_flush_logs
+end
+
+function push_port(operation,client)
+	logger:info("starting a connection back",client.remote_ip,tonumber(operation))
+	store:begin_sync(client.remote_ip,tonumber(operation))
+	return push_find_common
+end
+
+function push_ip(operation,client)
+	client.remote_ip = operation
+	return push_port
 end
 
 function push_identify(operation,client,connections)
@@ -152,8 +160,7 @@ function push_identify(operation,client,connections)
 	end
 	connections[operation] = client
 	client.id = operation
-
-	return push_find_common
+	return push_ip
 end
 
 function push_flush_logs(operation,client)
@@ -196,7 +203,9 @@ function pull_replicate(operation,client)
 		return replicate
 	end
 	local event = operation.data
+
 	err = Txn.put(txn,replication,client.id,event.last_updated,0)
+	logger:info("pulled",event.id,err)
 	if operation.action == "store" then
 		store:_store(event.bucket,event.id,event,true,true,txn)
 	elseif operation.action == "delete" then
@@ -214,13 +223,7 @@ end
 function pull_sync(operation,client)
 	if operation == "" then
 		logger:info("now all data needs to be refreshed on this node")
-		local replication,err = DB.open(client.txn,"replication",0)
-		if err then
-			Txn.abort(client.txn)
-			logger:warning("unable to open replication DB",err)
-			-- now i need to close the connection
-		end
-		err = Txn.put(client.txn,replication,client.id,client.last_updated,0)
+		err = Txn.put(client.txn,client.replication,client.remote_id,client.last_updated,0)
 		if err then
 			logger:error("unable to sync up with remote",err)
 			-- i probably should close the connection here
@@ -230,6 +233,9 @@ function pull_sync(operation,client)
 		if err then
 			logger:error("unable to sync up with remote",err)
 			-- i probably should close the connection here
+		end
+		if client.cb then
+			client.cb()
 		end
 		return pull_replicate
 	else
@@ -251,6 +257,7 @@ function pull_identify(operation,client)
 		logger:warning("unable to open replication DB",err)
 		-- now i need to close the connection
 	end
+	client.replication = replication
 	local last_updated,err = Txn.get(client.txn,replication,operation)
 	if last_updated then
 		client.write(last_updated)
@@ -260,13 +267,17 @@ function pull_identify(operation,client)
 	return pull_sync
 end
 
-function pull_init(env,id,client,cb)
+function pull_init(env,id,ip,port,client,cb)
 	logger:info("we are connected!",env,id,client,cb)
 	client = wrap(client)
-	client.txn = Env.txn_begin(env,nil,0)
+	local txn,err = Env.txn_begin(env,nil,0)
+	client.txn = txn
+	client.cb = cb
 	client.last_updated = 0
-	logger:info("going to send",id)
+	logger:info("going to send",id,ip,port)
 	client.write(id)
+	client.write(ip)
+	client.write(tostring(port))
 	local state = pull_identify
 	local buffer = ""
 
