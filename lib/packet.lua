@@ -55,7 +55,7 @@ end
 function Packet:build(secret,id,seq,alive_servers)
 	if not (#alive_servers < 512) then
 		logger:fatal("too many servers")
-		process.exit(1)
+		process:exit(1)
 	end
 	local a,b,c,d = self:pack(id)
 	local a1,b1,c1,d1 = self:pack(seq)

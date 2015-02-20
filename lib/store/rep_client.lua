@@ -97,9 +97,9 @@ function push_sync(operation,client)
 
 	local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"unsigned long*")
 	
-	logger:debug("comparing last known logs",client.version,key,version)
+	logger:info("comparing last known logs",client.version,key,key[0],version)
 
-	if not key then
+	if not key or key[0] == 0 then
 		logger:info("performing full sync")
 		local objects,err = DB.open(txn,"objects",0)
 		if err then
@@ -255,7 +255,8 @@ function pull_sync(operation,client)
 		if event.last_updated > client.last_updated then
 			client.last_updated = event.last_updated
 		end
-		store:_store(event.bucket,event.id,event,true,false,client.txn)
+		local ret,err = store:_store(event.bucket,event.id,event,true,false,client.txn)
+		logger:info(event.bucket,event.id,err)
 		return pull_sync
 	end
 end

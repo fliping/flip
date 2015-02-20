@@ -112,10 +112,10 @@ function System:enable()
 		-- that it is responsible for, but only if requested
 		if true then
 			local me = self
-			local stop = function() me:disable(function() process.exit(0) end) end
-			process:on('SIGINT',stop)
-			process:on('SIGQUIT',stop)
-			process:on('SIGTERM',stop)
+			local stop = function() me:disable(function() process:exit(0) end) end
+			process:on('sigint',stop)
+			process:on('sigquit',stop)
+			process:on('sigterm',stop)
 		end
 
 		-- we don't do this, this happens when this server gets added into the store

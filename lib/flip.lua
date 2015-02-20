@@ -16,7 +16,7 @@ local table = require('table')
 local string = require('string')
 local json = require('json')
 local math = require('math')
-local hrtime = require('uv').Process.hrtime
+local hrtime = require('uv').hrtime
 local logger = require('./logger')
 local Member = require('./member')
 local System = require('./system')
@@ -71,11 +71,11 @@ function Flip:start()
 				local object,err = self.store:store("servers",self.config.id,me)
 				if err then
 					logger:error("unable to create cluster: ",err)
-					process.exit(1)	
+					process:exit(1)	
 				end
 			elseif err then
 				logger:error("unable to access store: ",err)
-				process.exit(1)
+				process:exit(1)
 			end
 
 			local members = self.store:fetch("servers")
@@ -116,7 +116,7 @@ function Flip:start()
 			local member = self:find_member(self.config.id)
 			if member == nil then
 					logger:info("unable to find this server",self.config.id,err,member)
-					process.exit(1)
+					process:exit(1)
 			else
 				member:update_state('alive')
 			
@@ -131,7 +131,7 @@ function Flip:start()
 			end
 		else
 			logger:error("unable to start the store: ",err)
-			process.exit(1)
+			process:exit(1)
 		end
 	end)
 end
@@ -188,6 +188,10 @@ end
 
 function Flip:get_idx()
 	local servers,err = self.store:fetch("servers")
+	if err then
+		logger:error(err)
+		return
+	end
 	table.sort(servers,function(a,b) return a.created_at > b.created_at end)
 	for idx,object in pairs(servers) do
 		if object.id == self.config.id then
@@ -195,7 +199,7 @@ function Flip:get_idx()
 		end
 	end
 	logger:warning("unable to find my idx",err)
-	process.exit(1)
+	process:exit(1)
 	return object.idx
 end
 
@@ -314,7 +318,7 @@ function Flip:track(id,member,new_state)
 	local server,err = self.store:fetch("servers",id)
 	if err and not (err == "old data") then
 		logger:info("member doesn't exist anymore",server,err,id)
-		process.exit(1)
+		process:exit(1)
 	end
 	
 	-- we need to regenerate all the systems that are on this member

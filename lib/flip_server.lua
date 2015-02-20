@@ -13,7 +13,7 @@ local fs = require('fs')
 local os = require('os')
 local JSON = require('json')
 local math = require('math')
-local hrtime = require('uv').Process.hrtime
+local hrtime = require('uv').hrtime
 local Flip = require('./flip')
 local logger = require('./logger')
 
@@ -26,9 +26,15 @@ local data = nil
 
 -- it can be specified with the first parameter to the command
 if process.argv[1] == "-config-file" then
+	logger:info("reading file",process.argv[2])
 	data = fs.readFileSync(process.argv[2])
 elseif process.argv[1] == "-config-json" then
 	data = process.argv[2]
+end
+
+if not data then
+	logger:fatal("no config options were able to be read")
+	process:exit(1)
 end
 
 local validate_config = function(config)
@@ -40,7 +46,7 @@ local validate_config = function(config)
 			else
 				logger:fatal('config is missing required field \''.. name ..'\'')
 			end
-			process.exit(1)	
+			process:exit(1)	
 		end
 	end
 
@@ -51,8 +57,10 @@ local validate_config = function(config)
 	ensure(config.api,'api')
 	ensure(config.api.ip,'api.ip')
 	ensure(config.api.port,'api.port')
+	ensure(config.db,'db')
 end
 
+logger:debug("parsing",data)
 local config = JSON.parse(data)
 
 -- this will replace the old logger that was already setup as console

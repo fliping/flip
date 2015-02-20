@@ -11,7 +11,7 @@
 local logger = require('../logger')
 local JSON = require('json')
 local fs = require('fs')
-local hrtime = require('uv').Process.hrtime
+local hrtime = require('uv').hrtime
 local lmmdb = require('../lmmdb')
 Env = lmmdb.Env
 Txn = lmmdb.Txn
@@ -26,12 +26,12 @@ return function(Store)
 			Env.set_maxdbs(env,4)
 			if err then 
 				logger:fatal('unable to create store',err)
-				process.exit(1)
+				process:exit(1)
 			end
 			err = Env.open(env,self.db_path,Env.MDB_NOSUBDIR,0755)
 			if err then 
 				logger:fatal('unable to open store',err)
-				process.exit(1)
+				process:exit(1)
 			end
 			self.env = env
 			local txn = Env.txn_begin(env,nil,0)
@@ -71,16 +71,17 @@ return function(Store)
 					,error = function() end
 					,debug = function() end}
 				env.store = self
+				env.require = require
 				setfenv(load,env)
 				self.loading = true
-				load(__dirname .. '/../system-topology','topology')
-				load(__dirname .. '/../system-store','store')
-				load(__dirname .. '/../system-dev','dev')
+				load('lib/system-topology','topology')
+				load('lib/system-store','store')
+				load('lib/system-dev','dev')
 				self.loading = false
 				logger:info('loaded bootstrapped store')
 			elseif err then
 				logger:fatal("unable to open disk store",err)
-				process.exit(1)
+				process:exit(1)
 			else
 				logger:info('store was loaded from disk')
 			end

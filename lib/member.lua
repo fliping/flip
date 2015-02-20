@@ -10,7 +10,7 @@
 ---------------------------------------------------------------------
 
 local Emitter = require('core').Emitter
-local hrtime = require('uv').Process.hrtime
+local hrtime = require('uv').hrtime
 local JSON = require('json')
 local os = require('os')
 local timer = require('timer')

@@ -16,7 +16,6 @@ local http = require('http')
 local net = require('net')
 local timer = require('timer')
 local table = require('table')
-local net = require('net')
 local lmmdb = require("../lmmdb")
 
 

@@ -16,7 +16,7 @@ return function(bucket,id)
 	local object,err = store:fetch(bucket,id)
 	if err then
 		logger:error("unable to find object",err)
-		process.exit(1)
+		process:exit(1)
 	else
 		logger:info(object,err)
 	end

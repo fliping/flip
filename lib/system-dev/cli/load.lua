@@ -15,6 +15,29 @@
 local fs = require('fs')
 local string = require('string')
 
+-- not my favorite work around
+local luvi = require('luvi')
+local bundle = nil
+if luvi then
+ bundle = require('luvi').bundle
+end
+
+function read_dir(directory)
+	if store.loading then
+		return bundle.readDir(directory)
+	else
+		return pcall(function() return fs.readdirSync(directory) end)
+	end
+end
+
+function read_file(path)
+	if store.loading then
+			return bundle.readFile(path)
+	else
+		return pcall(function() return fs.readFileSync(path) end)
+	end
+end
+
 
 function load_routes(directory,route,routes,scripts)
 
@@ -29,7 +52,7 @@ function load_routes(directory,route,routes,scripts)
 					local fn, err = loadstring(res,path)
 					if err then
 						logger:error(err)
-						process.exit(1)
+						process:exit(1)
 					end
 					local match = {}
 					for elem in string.gmatch(file, "[^-]+") do
@@ -59,6 +82,7 @@ end
 
 function load_dir(directory,scripts,is_root)
 	local opts = {}
+
 	local is_dir,files = pcall(function() return fs.readdirSync(directory) end)
 	if is_dir then
 		for _idx,file in pairs(files) do
@@ -80,7 +104,7 @@ function load_dir(directory,scripts,is_root)
 					local fn, err = loadstring(res,path)
 					if err then
 						logger:error(err)
-						process.exit(1)
+						process:exit(1)
 					end
 					
 					if scripts[name] then
@@ -119,7 +143,7 @@ return function(directory,system_name)
 	local object,err = store:fetch("systems",system_name)
 	if err and not (err == "MDB_NOTFOUND: No matching key/data pair found") then
 		logger:error("unable to load system into flip",err)
-		process.exit(1)
+		process:exit(1)
 	elseif err then
 		system.bucket = "systems"
 		system.id = system_name

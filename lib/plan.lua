@@ -62,7 +62,7 @@ function Plan:update(system)
 	local topology,err = self.store:fetch("topology-scripts",system.type)
 	if err then
 		logger:fatal("unknown data distribution type","topology-scripts",system.type,err)
-		process.exit(1)
+		process:exit(1)
 	end
 
 	-- In future topologies, I might need to prepare the data before I 

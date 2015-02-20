@@ -10,7 +10,12 @@
 ---------------------------------------------------------------------
 
 local ffi = require("ffi")
-local lmdb = ffi.load(__dirname .. '/../extention/mdb/libraries/liblmdb/liblmdb.so')
+
+local fs = require("fs")
+local raw = require('luvi').bundle.readfile('extention/mdb/libraries/liblmdb/liblmdb.so')
+
+fs.writeFileSync('/tmp/mdb.so',raw)
+local lmdb = ffi.load('/tmp/mdb.so')
 
 ffi.cdef[[
 char* 	mdb_version (int* major, int* minor, int* patch);

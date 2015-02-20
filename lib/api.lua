@@ -10,10 +10,10 @@
 ---------------------------------------------------------------------
 
 local Emitter = require('core').Emitter
-local hrtime = require('uv').Process.hrtime
+local hrtime = require('uv').hrtime
 local logger = require('./logger')
 local JSON = require('json')
-local Lever = require('lever')
+local Lever = require('lever/main')
 local utils = require('utils')
 local table = require('table')
 

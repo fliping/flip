@@ -13,6 +13,7 @@ local logger = require('./logger')
 local os = require('os')
 local JSON = require('json')
 local http = require('http')
+local utils = require('utils')
 
 function main()
 	logger:debug("entering cli mode")
@@ -26,29 +27,29 @@ function main()
 	request('get','store','systems',system,nil,{},function(result,err)
 		if err == "not found" then
 			logger:error("command was not found",system,command)
-			process.exit(1)
+			process:exit(1)
 		elseif err then
 			logger:error(err)
-			process.exit(1)
+			process:exit(1)
 		elseif (system == nil) and (command == "help") then
 			for _idx,system in pairs(result) do
 				if system.description then
-					process.stdout:write(system.description)
+					utils.stdout:write(system.description)
 				end
 			end
 		elseif command == "help" then
 			if result.description then
-				process.stdout:write(result.description)
+				utils.stdout:write(result.description)
 			end
 			if result.help then
-				process.stdout:write(result.help)
+				utils.stdout:write(result.help)
 			end
 		elseif result and result.cli and result.cli[command] then
 			logger:debug("running script",result.cli[command])
 			request('get','store',system .. '-scripts',result.cli[command],nil,{},function(result,err)
 				if err then
 					logger:error("command was not found",system,command)
-					process.exit(1)
+					process:exit(1)
 				elseif result and result['$script'] then
 					logger:debug("running script",result)
 					local fn,err = loadstring(result['$script'], '@store/system:' .. system .. '/command:' .. command)
@@ -83,12 +84,12 @@ function main()
 					end
 				else
 					logger:error("command was not found",system,command)
-					process.exit(1)
+					process:exit(1)
 				end
 			end)
 		else
 			logger:error("command was not found",system,command)
-			process.exit(1)		
+			process:exit(1)		
 		end
 	end)
 		
@@ -159,14 +160,14 @@ function request(method,prefix,bucket,id,data,headers,cb)
 			chunks[#chunks + 1] = chunk
 			end)
 		res:on('end',function()
-			if (res.status_code > 199) and (res.status_code < 300) then
+			if (res.statusCode > 199) and (res.statusCode < 300) then
 				if #chunks > 0 then
 					local result = JSON.parse(table.concat(chunks))
 					cb(result)
 				else
 					cb()
 				end
-			elseif res.status_code == 404 then
+			elseif res.statusCode == 404 then
 				if #chunks > 0 then
 					logger:error("bad response",table.concat(chunks))
 				end
@@ -174,9 +175,9 @@ function request(method,prefix,bucket,id,data,headers,cb)
 				cb(nil,"not found")
 			else
 				if #chunks > 0 then
-					cb(nil,res.status_code ..": "..table.concat(chunks))
+					cb(nil,res.statusCode ..": "..table.concat(chunks))
 				else
-					cb(nil,res.status_code)
+					cb(nil,res.statusCode)
 				end
 			end
 		end)
