@@ -29,6 +29,9 @@ function main()
 			logger:error("command was not found",system,command)
 			process:exit(1)
 		elseif err then
+			if err == 'ECONNREFUSED' then
+				err = "unable to connect with store, did you remember to start it? `flip -server`"
+			end
 			logger:error(err)
 			process:exit(1)
 		elseif (system == nil) and (command == "help") then

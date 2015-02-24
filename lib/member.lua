@@ -73,13 +73,13 @@ end
 
 function Member:needs_ping()
 	return not (self.id == self.config.id) and (
-			(hrtime() - self.last_check > (1.5 * self.config.gossip_interval)) or 
-			(hrtime() - self.last_send > self.config.gossip_interval) or 
+			(hrtime() - self.last_check > (1000000 * (1.5 * self.config.gossip_interval))) or 
+			(hrtime() - self.last_send > (1000000 * self.config.gossip_interval)) or 
 			(self.state == 'probably_down'))
 end
 
 function Member:needs_probe()
-	return (hrtime() - self.last_check > 750)
+	return ((hrtime() - (1000000 * self.last_check)) > 750)
 end
 
 function Member:alive(seq)

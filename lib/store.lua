@@ -80,6 +80,39 @@ function Store:index(b_id,idx)
 	return ret
 end
 
+function Store:get_index(b_id,id)
+	local txn,err = Env.txn_begin(self.env,nil,Txn.MDB_RDONLY)
+	if err then
+		return nil,err
+	end
+	local buckets,err = DB.open(txn,"buckets",DB.MDB_DUPSORT)
+	if err then
+		logger:info("unable to open 'buckets' DB",err)
+		return nil,err
+	end
+	local cursor,err = Cursor.open(txn,buckets)
+	if err then
+		logger:info("unable to create cursor",err)
+		return nil,err
+	end
+
+	local key,check = Cursor.get(cursor,b_id,Cursor.MDB_SET_KEY)
+	local ret
+	local count = 1
+	while key == b_id do
+		if check == id then
+			ret = count
+			break
+		end
+		count = count + 1
+		key,check,err = Cursor.get(cursor,key,Cursor.MDB_NEXT_DUP)
+	end
+
+	Cursor.close(cursor)
+	Txn.abort(txn)
+	return ret
+end
+
 function Store:fetch(b_id,id,cb)
 	-- this should be a read only transaction
 	local txn,err = Env.txn_begin(self.env,nil,Txn.MDB_RDONLY)

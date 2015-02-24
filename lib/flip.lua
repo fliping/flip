@@ -122,6 +122,7 @@ function Flip:start()
 			
 				-- we start responding to udp queries
 				local socket = dgram.createSocket('udp4')
+				logger:info("udp socket",member.port,member.ip)
 				socket:bind(member.port,member.ip)
 				socket:on('message',function(...) self:handle_message(...) end)
 				self.dgram = socket
@@ -187,20 +188,7 @@ function Flip:find_member(key)
 end
 
 function Flip:get_idx()
-	local servers,err = self.store:fetch("servers")
-	if err then
-		logger:error(err)
-		return
-	end
-	table.sort(servers,function(a,b) return a.created_at > b.created_at end)
-	for idx,object in pairs(servers) do
-		if object.id == self.config.id then
-			return idx
-		end
-	end
-	logger:warning("unable to find my idx",err)
-	process:exit(1)
-	return object.idx
+	return self.store:get_index("servers",self.config.id)
 end
 
 function Flip:get_gossip_members()
@@ -286,7 +274,7 @@ end
 
 function Flip:ping(seq,id,nodes)
 	local member = self:find_member(id)
-	logger:debug('got ping',id)
+	logger:debug('got ping',id,member.id)
 	if member then
 		member:alive(seq)
 		if member:needs_ping() then
