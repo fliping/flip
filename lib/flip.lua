@@ -31,19 +31,14 @@ function Flip:initialize(config)
 	self.config.quorum = 0
 	self.members = {}
 	self.member_count = 0
-	-- self.iservers = {}
 	self.alive = {}
 	self.map = {}
 	self.inverse_map = {}
 	self.packet = Packet:new()
 	self.api = Api:new(self,config.api.port,config.api.ip)
 
-	----
-	-- this needs to be reworked.
-	----
-	-- create a unique id for this store. bascially a UUID
 	self.store = Store
-	Store:configure(config.db,config.id,{node = config.id,time = hrtime(),random = math.random(100000)},config.replication.ip,config.replication.port,self.api)
+	Store:configure(config.db,config.id,self,config.replication.ip,config.replication.port,self.api)
 end
 
 function Flip:start()
@@ -122,7 +117,7 @@ function Flip:start()
 			
 				-- we start responding to udp queries
 				local socket = dgram.createSocket('udp4')
-				logger:info("udp socket",member.port,member.ip)
+				logger:debug("udp socket",member.port,member.ip)
 				socket:bind(member.port,member.ip)
 				socket:on('message',function(...) self:handle_message(...) end)
 				self.dgram = socket

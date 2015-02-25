@@ -79,10 +79,8 @@ end
 
 
 function Api:error_code(err)
-	if (err == "MDB_NOTFOUND: No matching key/data pair found") then
+	if (err ~= "MDB_NOTFOUND") then
 		return 404
-	elseif (err == "old data") then
-		return 203
 	else
 		return 500
 	end

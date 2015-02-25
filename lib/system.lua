@@ -59,6 +59,10 @@ function System:check_system(kind,id,system_config)
 		else
 			self:init_system(system_config)
 			self.plans[id] = Plan:new(system_config,id,self.flip,self.store)
+			plan:on('change',function(id,...) 
+				self:emit('change:',id,...) 
+				self:emit('change:' .. id,id,...) 
+			end)
 			logger:info("created system:",id)
 		end
 	elseif kind == "delete" then
@@ -85,6 +89,21 @@ function System:regen(systems)
 	end
 end
 
+function System:status(id)
+	if id then
+		local plan = self.plans[id]
+		if plan then
+			return plan:status()
+		end
+	else
+		local status = {}
+		for id,plan in pairs(self.plans) do
+			status[id] = plan:status()
+		end
+		return status
+	end
+end
+
 function System:enable()
 	if not self.enabled then
 		self.enabled = true
@@ -99,6 +118,10 @@ function System:enable()
 			self:init_system(system_config)
 
 			local plan = Plan:new(system_config,sys_id,self.flip,self.store)
+			plan:on('change',function(id,...) 
+				self:emit('change:',id,...) 
+				self:emit('change:' .. id,id,...) 
+			end)
 			self.plans[sys_id] = plan
 
 			-- this should only be enabled if I am a member of the system
@@ -133,8 +156,8 @@ function System:init_system(system)
 		local script,err = self.store:fetch(system.id .. '-scripts',system.init)
 		if script and script.script then
 			logger:info("running",script)
-			-- init scrips are primarily for starting up api endpoints
-			script.script(self.flip.api.lever)
+			-- not sure what the init scripts are for yet
+			script.script()
 		end
 		local build = function(key)
 			return function(req,res)

@@ -23,10 +23,11 @@ Cursor = lmmdb.Cursor
 
 local Store = Emitter:extend()
 
-function Store:configure(path,id,version,ip,port,api)
+function Store:configure(path,id,flip,ip,port,api)
 	require('./store/failover')(Store)
 	require('./store/storage')(Store)
 	self.api = api
+	self.flip = flip
 	self.id = id
 	self.scripts = {}
 	self.ip = ip
@@ -191,7 +192,9 @@ function Store:fetch(b_id,id,cb)
 end
 
 function Store:store(b_id,id,data,cb)
-	if self.is_master then
+	if b_id == nil or id == nil or data == nil then
+		return nil,"missing required args"
+	elseif self.is_master then
 		return self:_store(b_id,id,data,false,true,nil,cb)
 	else
 		return {master = {ip = self.master.ip, port = self.master.port}},"read only slave"
@@ -199,7 +202,9 @@ function Store:store(b_id,id,data,cb)
 end
 
 function Store:delete(b_id,id,cb)
-	if self.is_master then
+	if b_id == nil or id == nil then
+		return nil,"missing required args"
+	elseif self.is_master then
 		return self:_delete(b_id,id,false,true,nil,cb)
 	else
 		return {master = {ip = self.master.ip, port = self.master.port}},"read only slave"
@@ -318,7 +323,9 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	-- send any updates off
 	local updated = true
 	if broadcast and updated then
-		self:emit(b_id,"store",id,data)
+		logger:info("broadcasting",b_id .. ":",b_id .. ":" .. id,data)
+		self:emit(b_id .. ":","store",id,data)
+		self:emit(b_id .. ":" .. id,"store",id,data)
 	end
 	
 	if not(sync) and not(self.loading) then
@@ -388,7 +395,8 @@ function Store:_delete(b_id,id,sync,broadcast,parent,cb)
 	self.scripts[key] = nil
 
 	if broadcast then
-		self:emit(b_id,"delete",id)
+		self:emit(b_id .. ":","delete",id)
+		self:emit(b_id .. ":" .. id,"delete",id)
 	end
 	
 	if not sync then
@@ -447,8 +455,10 @@ function Store:compile(data,bucket,id)
 			,xpcall = xpcall
 			,table = table
 			,store = self
+			,system = self.flip.system
 			,logger = logger
 			,JSON = JSON
+			,string = string
 			,tonumber = tonumber
 			,tostring = tostring
 			,error_code = self.api.error_code

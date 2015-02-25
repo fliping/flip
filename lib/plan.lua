@@ -44,6 +44,12 @@ function Plan:initialize(system,sys_name,flip,store)
 	self:update(system)
 end
 
+function Plan:status()
+	return
+		{data = self.plan
+		,stable = (self.queue == nil) and (self.plan_activation_timer == nil)}
+end
+
 function Plan:disable(cb)
 	self.enabled = false
 	self:_run('down',self.plan,function()
@@ -285,6 +291,7 @@ function Plan:run()
 		-- run the down scripts
 		self:_run("down",queue.remove,function()
 			self.mature = true
+			self:emit('change',self.sys_name,queue.add,queue.remove)
 			
 			if self.queue == true then
 				-- if not, lets end

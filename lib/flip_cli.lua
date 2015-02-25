@@ -118,14 +118,14 @@ function bind_store(batton)
 			coroutine.yield()
 			return unpack(batton.respose)
 		end
-		,delete = function(_,bucket,id,last_known) 
-			batton.call = function(cb) request('delete','store',bucket,id,nil,{["last-known-update"]=last_known},cb) end
+		,delete = function(_,bucket,id) 
+			batton.call = function(cb) request('delete','store',bucket,id,nil,{},cb) end
 			coroutine.yield()
 			return unpack(batton.respose)
 		end
-		,store = function(_,bucket,id,data,last_known) 
+		,store = function(_,bucket,id,data) 
 			logger:debug("making request",bucket,id,data)
-			batton.call = function(cb) request('post','store',bucket,id,data,{["last-known-update"]=last_known},cb) end
+			batton.call = function(cb) request('post','store',bucket,id,data,{},cb) end
 			coroutine.yield()
 			return unpack(batton.respose)
 		end
@@ -148,14 +148,14 @@ function request(method,prefix,bucket,id,data,headers,cb)
 
 	local options =
 			{host = "127.0.0.1" -- these need to be pulled from the config file...
-			,port = 8080
+			,port = 2345
 			,method = method
 			,path = path
 			,headers = headers}
 	if data then
 		data = JSON.stringify(data)
-		options.headers["content-length"] = #data
-		options.headers["content-type"] = "application/json"
+		options.headers[#options.headers + 1] = {"content-length", #data}
+		options.headers[#options.headers + 1] = {"content-type", "application/json"}
 	end
 	local req = http.request(options, function (res)
 		local chunks = {}

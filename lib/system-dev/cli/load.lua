@@ -23,8 +23,10 @@ if luvi then
 end
 
 function read_dir(directory)
+	logger:info("loading bundle",store.loading)
 	if store.loading then
-		return bundle.readDir(directory)
+		logger:info(bundle.readdir(directory))
+		return true,bundle.readdir(directory)
 	else
 		return pcall(function() return fs.readdirSync(directory) end)
 	end
@@ -32,7 +34,7 @@ end
 
 function read_file(path)
 	if store.loading then
-			return bundle.readFile(path)
+			return true,bundle.readfile(path)
 	else
 		return pcall(function() return fs.readFileSync(path) end)
 	end
@@ -41,12 +43,12 @@ end
 
 function load_routes(directory,route,routes,scripts)
 
-	local is_dir,files = pcall(function() return fs.readdirSync(directory) end)
+	local is_dir,files = read_dir(directory)
 	if is_dir then
 		for _idx,file in pairs(files) do
 			local path = directory .. "/" .. file
 			if path:sub(-4) == ".lua" then
-				local success,res = pcall(function() return fs.readFileSync(path) end)
+				local success,res = read_file(path)
 				if success then
 					logger:info("loading file",path)
 					local fn, err = loadstring(res,path)
@@ -83,7 +85,7 @@ end
 function load_dir(directory,scripts,is_root)
 	local opts = {}
 
-	local is_dir,files = pcall(function() return fs.readdirSync(directory) end)
+	local is_dir,files = read_dir(directory)
 	if is_dir then
 		for _idx,file in pairs(files) do
 			local path = directory .. "/" .. file
@@ -91,14 +93,14 @@ function load_dir(directory,scripts,is_root)
 			
 			logger:debug("reading file",path)
 			if path:sub(-4) == ".txt" then
-				local success,res = pcall(function() return fs.readFileSync(path) end)
+				local success,res = read_file(path)
 				if success then
 					local name = file:sub(1,-5)
 					opts[name] = res
 				end
 			elseif path:sub(-4) == ".lua" then
 				local name = file:sub(1,-5)
-				local success,res = pcall(function() return fs.readFileSync(path) end)
+				local success,res = read_file(path)
 				if success then
 					logger:debug("loading file",path)
 					local fn, err = loadstring(res,path)
@@ -130,46 +132,50 @@ function load_dir(directory,scripts,is_root)
 end
 
 return function(directory,system_name)
-	logger:info("starting to read from",directory,system_name)
+	logger:info("starting to read from",directory,system_name,store.loading)
 	local system,scripts = load_dir(directory,{},true)
 	logger:info("was able to build system")
+	if system then
 
-	-- local success,description = pcall(function() return fs.readFileSync(directory .. "/description.txt") end)
-	-- local success,help = pcall(function() return fs.readFileSync(directory .. "/help.txt") end)
-	-- system.description = description
-	-- system.help = help
-	
+		-- local success,description = pcall(function() return fs.readFileSync(directory .. "/description.txt") end)
+		-- local success,help = pcall(function() return fs.readFileSync(directory .. "/help.txt") end)
+		-- system.description = description
+		-- system.help = help
+		
 
-	local object,err = store:fetch("systems",system_name)
-	if err and not (err == "MDB_NOTFOUND: No matching key/data pair found") then
-		logger:error("unable to load system into flip",err)
-		process:exit(1)
-	elseif err then
-		system.bucket = "systems"
-		system.id = system_name
-	else
-		if object then
-			for key,value in pairs(object) do
-				if system[key] == nil then
-					system[key] = value
+		local object,err = store:fetch("systems",system_name)
+		if err and not (err == "MDB_NOTFOUND: No matching key/data pair found") then
+			logger:error("unable to load system into flip",err)
+			process:exit(1)
+		elseif err then
+			system.bucket = "systems"
+			system.id = system_name
+		else
+			if object then
+				for key,value in pairs(object) do
+					if system[key] == nil then
+						system[key] = value
+					end
 				end
 			end
 		end
-	end
-	logger:info("going to load scripts into system",system.id)
-	for id,script in pairs(scripts) do
-		local obj,err = store:fetch(system.id .. '-scripts',id)
-		if obj then
-			script.last_updated = obj.last_updated
+		logger:info("going to load scripts into system",system.id)
+		for id,script in pairs(scripts) do
+			local obj,err = store:fetch(system.id .. '-scripts',id)
+			if obj then
+				script.last_updated = obj.last_updated
+			end
+			local obj,err = store:store(system.id .. '-scripts',id,script)
+			if err then
+				logger:info(err)
+			end
 		end
-		local obj,err = store:store(system.id .. '-scripts',id,script)
+		logger:info("going to load new system in",system.id)
+		local object,err = store:store(system.bucket,system.id,system)
 		if err then
 			logger:info(err)
 		end
-	end
-	logger:info("going to load new system in",system.id)
-	local object,err = store:store(system.bucket,system.id,system)
-	if err then
-		logger:info(err)
+	else
+		logger:error("unable to load system")
 	end
 end

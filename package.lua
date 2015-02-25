@@ -17,9 +17,11 @@ return {
   	,"flip/lever@0.2.0"},
   files = {
     "*.lua",
+    "*.txt",
     "*.so",
     "!examples",
-    "!tests"
+    "!tests",
+    "!.DS_Store"
   }
 }
 
