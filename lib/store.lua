@@ -313,8 +313,6 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 		logger:error("unable to commit transaction",err)
 		return nil,err
 	end
-	
-	logger:info("stored",key)
 
 	-- compile any scripts and store them off.
 	fn = self:compile(data,b_id,id)
@@ -323,7 +321,7 @@ function Store:_store(b_id,id,data,sync,broadcast,parent,cb)
 	-- send any updates off
 	local updated = true
 	if broadcast and updated then
-		logger:info("broadcasting",b_id .. ":",b_id .. ":" .. id,data)
+		logger:debug("broadcasting",b_id .. ":",b_id .. ":" .. id,data)
 		self:emit(b_id .. ":","store",id,data)
 		self:emit(b_id .. ":" .. id,"store",id,data)
 	end
@@ -406,16 +404,16 @@ end
 
 function  Store:replicate(operation,op_timestamp,cb)
 	local total = 1
-	logger:info("starting to clean logs",op_timestamp)
+	logger:debug("starting to clean logs",op_timestamp)
 	local current = 0
 	local complete = function()
-		logger:info('remote reported that log was committed')
+		logger:debug('remote reported that log was committed')
 		current = current + 1
 		if cb then
 			cb(current,total,nil)
 		end
 		if current == total then
-			logger:info("all remotes have reported, now cleaning logs")
+			logger:debug("all remotes have reported, now cleaning logs")
 			local txn,err = Env.txn_begin(self.env,nil,0)
 			if err then
 				logger:error("unable to begin txn to clear log")
@@ -437,7 +435,7 @@ function  Store:replicate(operation,op_timestamp,cb)
 	
 	for id,connection in pairs(self.push_connections) do
 		total = total + 1
-		logger:info("writing",tostring(op_timestamp),connection.id)
+		logger:debug("writing",tostring(op_timestamp),connection.id)
 		connection.write(operation)
 		connection.events:once(tostring(op_timestamp),complete)
 	end

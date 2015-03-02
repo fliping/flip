@@ -45,6 +45,7 @@ function Plan:initialize(system,sys_name,flip,store)
 end
 
 function Plan:status()
+	logger:info("getting status for plan",self.sys_name)
 	return
 		{data = self.plan
 		,stable = (self.queue == nil) and (self.plan_activation_timer == nil)}

@@ -9,8 +9,8 @@
 -- Created :   4 Feb 2015 by Daniel Barney <daniel@pagodabox.com>
 ---------------------------------------------------------------------
 local luvi = require('luvi')
-luvi.bundle.register('require', "modules/require.lua")
-local require = require('require')()("bundle:main.lua")
+luvi.bundle.register('require', "deps/require.lua")
+local require = require('require')("bundle:main.lua")
 
 -- Create a luvit powered main that does the luvit CLI interface
 return require('luvit')(function (...)

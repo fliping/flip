@@ -35,7 +35,6 @@ return function(req,res)
 			else
 				nodes = 1
 			end
-			logger:info("committing post on nodes:",nodes)
 
 			local done = false
 

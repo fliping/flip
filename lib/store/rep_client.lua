@@ -10,6 +10,7 @@
 ---------------------------------------------------------------------
 
 local Emitter = require('core').Emitter
+local hrtime = require('uv').hrtime
 local logger = require('../logger')
 local Packet = require('../packet')
 local JSON = require('json')
@@ -67,7 +68,7 @@ end
 
 
 function push_flush_logs(operation,client)
-	logger:info("client has commited",operation)
+	logger:debug("client has commited",operation)
 	client.events:emit(operation)
 	return push_flush_logs
 end
@@ -98,7 +99,6 @@ function push_sync(operation,client)
 	local key,op = Cursor.get(cursor,version,Cursor.MDB_SET_KEY,"unsigned long*")
 	
 	-- logger:info("comparing last known logs",client.version,key,key[0],version)
-
 	if not key or key[0] == 0 then
 		logger:info("performing full sync")
 		local objects,err = DB.open(txn,"objects",0)
@@ -240,6 +240,7 @@ function pull_sync(operation,client)
 		end
 		logger:info("last sync point",client.last_updated,client.remote_id)
 		err = Txn.commit(client.txn)
+		logger:info("database update finished in ",(hrtime() - client.sync_start)/1000000000)
 		client.txn = nil
 		if err then
 			logger:warning("unable to sync up with remote",err)
@@ -251,6 +252,9 @@ function pull_sync(operation,client)
 		store:emit("refresh")
 		return pull_replicate
 	else
+		if not client.sync_start then
+			client.sync_start = hrtime()
+		end
 		local event = JSON.parse(operation)
 		if event.last_updated > client.last_updated then
 			client.last_updated = event.last_updated
