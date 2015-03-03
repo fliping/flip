@@ -31,6 +31,10 @@ return function(Store)
 				process:exit(1)
 			end
 			err = Env.open(env,self.db_path,Env.MDB_NOSUBDIR,0755)
+			if err == 'Device busy' then
+				fs.unlink(env,self.db_path .. '-lock')
+				err = Env.open(env,self.db_path,Env.MDB_NOSUBDIR,0755)
+			end
 			if err then 
 				logger:fatal('unable to open store',err)
 				process:exit(1)
